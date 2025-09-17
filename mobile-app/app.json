@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Climatrail - Weather Intelligence App",
+    "slug": "climatrail-weather-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/climatrail-logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/climatrail-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#87CEEB"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.climatrail.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/climatrail-logo.png",
+        "backgroundColor": "#87CEEB"
+      },
+      "package": "com.climatrail.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
+      "blockedPermissions": []
+    },
+    "web": {
+      "favicon": "./assets/climatrail-logo.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Climatrail to access your location for accurate weather intelligence and risk analysis."
+        }
+      ]
+    ],
+    "sdkVersion": "49.0.0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Climatrail",
+    "slug": "climatrail",
+    "version": "1.0.0",
+    "orientation": "portrait",
+
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.climatrail.app"
+    },
+    "android": {
+      "package": "com.climatrail.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
+      "blockedPermissions": []
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "02a75935-8e3a-49ef-9fc2-2147f00bfe6b"
+      }
+    }
+  }
+}
