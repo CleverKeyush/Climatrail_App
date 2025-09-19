@@ -23,6 +23,8 @@ export default function HomeScreen({ location }) {
     const [isManualLocation, setIsManualLocation] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
     const [showLocationSearch, setShowLocationSearch] = useState(false);
+    const [smartAlerts, setSmartAlerts] = useState([]);
+    const [clothingAdvice, setClothingAdvice] = useState([]);
 
     useEffect(() => {
         if (location) {
@@ -140,7 +142,11 @@ export default function HomeScreen({ location }) {
             };
 
             const weatherAnalysis = analyzeWeatherRisks(processedData, region.latitude, region.longitude, date, selectedActivity);
+            const alerts = generateSmartAlerts(weatherAnalysis);
+            const clothing = generateClothingAdvice(weatherAnalysis, selectedActivity);
             setWeather(weatherAnalysis);
+            setSmartAlerts(alerts);
+            setClothingAdvice(clothing);
         } catch (error) {
             const fallbackWeather = generateDemoWeather(region.latitude, region.longitude, date);
             setWeather(fallbackWeather);
@@ -386,113 +392,811 @@ export default function HomeScreen({ location }) {
             maxTemp = 22; minTemp = 15; windSpeed = 10; precipitation = 2; humidity = 60;
         }
 
-        // 🌡️ Risk Categories - Always show all 5 categories
+        // 🌡️ Activity-Specific Risk Categories - Always show all 5 categories
         const risks = [];
 
-        // 1. 🔥 Very Hot - Temperature-based heat risk
-        if (maxTemp > 30) {
-            const severity = maxTemp > 35 ? "EXTREME" : maxTemp > 32 ? "HIGH" : "MODERATE";
-            risks.push({
-                label: "Very Hot",
-                icon: "🔥",
-                risk: `${severity} heat risk - ${maxTemp.toFixed(1)}°C`,
-                advice: `Temperature will reach ${maxTemp.toFixed(1)}°C. Stay hydrated and avoid midday activities.`,
-                color: "red"
-            });
+        // Get activity-specific thresholds and advice
+        const getActivityAdvice = (category, severity, value, activity) => {
+            const activityAdvice = {
+                hiking: {
+                    hot: {
+                        EXTREME: `🥾 HIKING ALERT: ${value}°C is dangerous for hiking. Start before 6 AM, bring 3L+ water, electrolytes, and consider postponing.`,
+                        HIGH: `🥾 HIKING CAUTION: ${value}°C requires early start (before 7 AM), 2L+ water, frequent shade breaks, and sun protection.`,
+                        MODERATE: `🥾 HIKING ADVICE: ${value}°C is warm for hiking. Bring extra water, wear light colors, and avoid midday sun.`,
+                        SAFE: `🥾 HIKING PERFECT: ${value}°C is ideal for hiking. Comfortable temperature for all-day trails.`
+                    },
+                    cold: {
+                        EXTREME: `🥾 HIKING ALERT: ${value}°C is dangerous. Bring winter gear, insulated boots, emergency shelter, and inform others of your route.`,
+                        HIGH: `🥾 HIKING CAUTION: ${value}°C requires warm layers, waterproof boots, gloves, hat, and emergency supplies.`,
+                        MODERATE: `🥾 HIKING ADVICE: ${value}°C needs warm clothing, extra layers, and hot drinks. Check trail conditions.`,
+                        SAFE: `🥾 HIKING GOOD: ${value}°C is comfortable for hiking with normal outdoor clothing.`
+                    },
+                    wind: {
+                        EXTREME: `🥾 HIKING DANGER: ${value} km/h winds are hazardous on ridges and exposed trails. Avoid high elevations.`,
+                        HIGH: `🥾 HIKING CAUTION: ${value} km/h winds require extra stability. Avoid exposed ridges and secure all gear.`,
+                        MODERATE: `🥾 HIKING ADVICE: ${value} km/h winds may affect balance on narrow trails. Secure loose items.`,
+                        SAFE: `🥾 HIKING IDEAL: ${value} km/h winds are manageable for all hiking trails.`
+                    },
+                    wet: {
+                        EXTREME: `🥾 HIKING ALERT: ${value}mm rain makes trails dangerous. Risk of flash floods and slippery rocks. Consider postponing.`,
+                        HIGH: `🥾 HIKING CAUTION: ${value}mm rain requires waterproof gear, extra grip shoes, and avoid stream crossings.`,
+                        MODERATE: `🥾 HIKING ADVICE: ${value}mm rain needs rain gear and extra caution on rocky/muddy sections.`,
+                        SAFE: `🥾 HIKING PERFECT: ${value}mm light rain won't affect most hiking trails.`
+                    }
+                },
+                camping: {
+                    hot: {
+                        EXTREME: `⛺ CAMPING ALERT: ${value}°C overnight heat is dangerous. Bring cooling towels, extra water, and consider air-conditioned shelter.`,
+                        HIGH: `⛺ CAMPING CAUTION: ${value}°C requires shade setup, cooling strategies, and extra hydration for comfortable sleep.`,
+                        MODERATE: `⛺ CAMPING ADVICE: ${value}°C is warm for camping. Set up in shade, bring fans, and extra water.`,
+                        SAFE: `⛺ CAMPING PERFECT: ${value}°C is ideal for comfortable outdoor camping.`
+                    },
+                    cold: {
+                        EXTREME: `⛺ CAMPING ALERT: ${value}°C requires winter camping gear, 4-season tent, sleeping bag rated -10°C+, and emergency heating.`,
+                        HIGH: `⛺ CAMPING CAUTION: ${value}°C needs warm sleeping bag, insulated pad, winter tent, and backup heating source.`,
+                        MODERATE: `⛺ CAMPING ADVICE: ${value}°C requires warm sleeping gear, extra blankets, and windproof tent setup.`,
+                        SAFE: `⛺ CAMPING GOOD: ${value}°C is comfortable for camping with standard gear.`
+                    }
+                },
+                fishing: {
+                    hot: {
+                        EXTREME: `🎣 FISHING ALERT: ${value}°C heat affects fish behavior. Fish before dawn/after dusk, bring shade, and stay hydrated.`,
+                        HIGH: `🎣 FISHING ADVICE: ${value}°C is hot for fishing. Early morning and evening are best. Bring sun protection.`,
+                        MODERATE: `🎣 FISHING GOOD: ${value}°C is warm but manageable. Fish in shaded areas and stay hydrated.`,
+                        SAFE: `🎣 FISHING PERFECT: ${value}°C is ideal for all-day fishing comfort.`
+                    },
+                    wind: {
+                        EXTREME: `🎣 FISHING DANGER: ${value} km/h winds make boat fishing dangerous and casting nearly impossible.`,
+                        HIGH: `🎣 FISHING DIFFICULT: ${value} km/h winds affect casting accuracy and boat stability. Shore fishing recommended.`,
+                        MODERATE: `🎣 FISHING CHALLENGING: ${value} km/h winds require adjusted casting technique and secure equipment.`,
+                        SAFE: `🎣 FISHING IDEAL: ${value} km/h winds are perfect for comfortable fishing.`
+                    }
+                },
+                cycling: {
+                    hot: {
+                        EXTREME: `🚴 CYCLING ALERT: ${value}°C is dangerous for cycling. Risk of heat exhaustion. Cycle before 7 AM or after 7 PM only.`,
+                        HIGH: `🚴 CYCLING CAUTION: ${value}°C requires early morning rides, frequent water breaks, and electrolyte replacement.`,
+                        MODERATE: `🚴 CYCLING ADVICE: ${value}°C is warm for cycling. Bring extra water, wear light colors, and take shade breaks.`,
+                        SAFE: `🚴 CYCLING PERFECT: ${value}°C is ideal for comfortable cycling at any time.`
+                    },
+                    wind: {
+                        EXTREME: `🚴 CYCLING DANGER: ${value} km/h headwinds make cycling extremely difficult and potentially unsafe.`,
+                        HIGH: `🚴 CYCLING CHALLENGING: ${value} km/h winds significantly increase effort and affect bike handling.`,
+                        MODERATE: `🚴 CYCLING ADVICE: ${value} km/h winds require extra effort and careful handling, especially on turns.`,
+                        SAFE: `🚴 CYCLING IDEAL: ${value} km/h winds are manageable for comfortable cycling.`
+                    }
+                },
+                outdoor_events: {
+                    hot: {
+                        EXTREME: `📅 EVENT ALERT: ${value}°C is dangerous for outdoor events. Provide cooling stations, medical support, and consider rescheduling.`,
+                        HIGH: `📅 EVENT CAUTION: ${value}°C requires shade structures, water stations, and frequent breaks for attendees.`,
+                        MODERATE: `📅 EVENT ADVICE: ${value}°C needs shade options, extra water, and sun protection for guests.`,
+                        SAFE: `📅 EVENT PERFECT: ${value}°C is comfortable for outdoor events and activities.`
+                    },
+                    wet: {
+                        EXTREME: `📅 EVENT ALERT: ${value}mm rain will severely impact outdoor events. Have indoor backup or postpone.`,
+                        HIGH: `📅 EVENT CAUTION: ${value}mm rain requires covered areas, waterproof setup, and weather contingency plans.`,
+                        MODERATE: `📅 EVENT ADVICE: ${value}mm rain needs tent/canopy coverage and waterproof equipment protection.`,
+                        SAFE: `📅 EVENT GOOD: ${value}mm light rain won't significantly affect most outdoor events.`
+                    }
+                }
+            };
+
+            const defaultAdvice = {
+                hot: { SAFE: `Temperature ${value}°C is comfortable for ${activity} activities.` },
+                cold: { SAFE: `Temperature ${value}°C is suitable for ${activity} with proper clothing.` },
+                wind: { SAFE: `Wind speed ${value} km/h is manageable for ${activity} activities.` },
+                wet: { SAFE: `Precipitation ${value}mm is minimal and won't affect ${activity}.` }
+            };
+
+            return activityAdvice[activity]?.[category]?.[severity] ||
+                defaultAdvice[category]?.[severity] ||
+                `Conditions are ${severity.toLowerCase()} for ${activity}.`;
+        };
+
+        // 1. 🔥 Very Hot - Activity-specific temperature analysis
+        let hotSeverity, hotAdvice;
+        if (maxTemp > 35) {
+            hotSeverity = "EXTREME";
+            hotAdvice = getActivityAdvice('hot', 'EXTREME', maxTemp.toFixed(1), activity);
+        } else if (maxTemp > 30) {
+            hotSeverity = activity === 'cycling' ? "HIGH" : "MODERATE"; // Cycling is more sensitive to heat
+            hotAdvice = getActivityAdvice('hot', hotSeverity, maxTemp.toFixed(1), activity);
+        } else if (maxTemp > 25 && activity === 'cycling') {
+            hotSeverity = "MODERATE";
+            hotAdvice = getActivityAdvice('hot', 'MODERATE', maxTemp.toFixed(1), activity);
         } else {
-            risks.push({
-                label: "Very Hot",
-                icon: "🔥",
-                risk: `No heat risk - ${maxTemp.toFixed(1)}°C`,
-                advice: `Temperature ${maxTemp.toFixed(1)}°C is comfortable for outdoor activities.`,
-                color: "green"
-            });
+            hotSeverity = "SAFE";
+            hotAdvice = getActivityAdvice('hot', 'SAFE', maxTemp.toFixed(1), activity);
         }
 
-        // 2. 🥶 Very Cold - Low temperature warnings
-        if (minTemp < 5) {
-            const severity = minTemp < 0 ? "EXTREME" : minTemp < 2 ? "HIGH" : "MODERATE";
-            risks.push({
-                label: "Very Cold",
-                icon: "🥶",
-                risk: `${severity} cold risk - ${minTemp.toFixed(1)}°C`,
-                advice: `Minimum temperature ${minTemp.toFixed(1)}°C. Dress warmly and bring extra layers.`,
-                color: "blue"
-            });
+        risks.push({
+            label: "Very Hot",
+            icon: "🔥",
+            risk: `${hotSeverity !== 'SAFE' ? hotSeverity + ' heat risk' : 'No heat risk'} - ${maxTemp.toFixed(1)}°C`,
+            advice: hotAdvice,
+            color: hotSeverity === 'EXTREME' ? "red" : hotSeverity === 'HIGH' ? "orange" : hotSeverity === 'MODERATE' ? "yellow" : "green"
+        });
+
+        // 2. 🥶 Very Cold - Activity-specific cold analysis
+        let coldSeverity, coldAdvice;
+        const coldThreshold = activity === 'fishing' ? 10 : activity === 'camping' ? 5 : 0; // Different activities have different cold sensitivity
+
+        if (minTemp < coldThreshold - 10) {
+            coldSeverity = "EXTREME";
+            coldAdvice = getActivityAdvice('cold', 'EXTREME', minTemp.toFixed(1), activity);
+        } else if (minTemp < coldThreshold - 5) {
+            coldSeverity = "HIGH";
+            coldAdvice = getActivityAdvice('cold', 'HIGH', minTemp.toFixed(1), activity);
+        } else if (minTemp < coldThreshold) {
+            coldSeverity = "MODERATE";
+            coldAdvice = getActivityAdvice('cold', 'MODERATE', minTemp.toFixed(1), activity);
         } else {
-            risks.push({
-                label: "Very Cold",
-                icon: "🥶",
-                risk: `No cold risk - ${minTemp.toFixed(1)}°C`,
-                advice: `Minimum temperature ${minTemp.toFixed(1)}°C is comfortable.`,
-                color: "green"
-            });
+            coldSeverity = "SAFE";
+            coldAdvice = getActivityAdvice('cold', 'SAFE', minTemp.toFixed(1), activity);
         }
 
-        // 3. 💨 Very Windy - Wind speed hazards
-        if (windSpeed > 25) {
-            const severity = windSpeed > 40 ? "EXTREME" : windSpeed > 30 ? "HIGH" : "MODERATE";
-            risks.push({
-                label: "Very Windy",
-                icon: "💨",
-                risk: `${severity} wind hazard - ${windSpeed.toFixed(1)} km/h`,
-                advice: `Strong winds ${windSpeed.toFixed(1)} km/h. Secure equipment and seek shelter.`,
-                color: "orange"
-            });
+        risks.push({
+            label: "Very Cold",
+            icon: "🥶",
+            risk: `${coldSeverity !== 'SAFE' ? coldSeverity + ' cold risk' : 'No cold risk'} - ${minTemp.toFixed(1)}°C`,
+            advice: coldAdvice,
+            color: coldSeverity === 'EXTREME' ? "blue" : coldSeverity === 'HIGH' ? "lightblue" : coldSeverity === 'MODERATE' ? "cyan" : "green"
+        });
+
+        // 3. 💨 Very Windy - Activity-specific wind analysis
+        let windSeverity, windAdvice;
+        const windThreshold = activity === 'fishing' || activity === 'cycling' ? 20 : 25; // More sensitive activities
+
+        if (windSpeed > windThreshold + 20) {
+            windSeverity = "EXTREME";
+            windAdvice = getActivityAdvice('wind', 'EXTREME', windSpeed.toFixed(1), activity);
+        } else if (windSpeed > windThreshold + 10) {
+            windSeverity = "HIGH";
+            windAdvice = getActivityAdvice('wind', 'HIGH', windSpeed.toFixed(1), activity);
+        } else if (windSpeed > windThreshold) {
+            windSeverity = "MODERATE";
+            windAdvice = getActivityAdvice('wind', 'MODERATE', windSpeed.toFixed(1), activity);
         } else {
-            risks.push({
-                label: "Very Windy",
-                icon: "💨",
-                risk: `No wind hazard - ${windSpeed.toFixed(1)} km/h`,
-                advice: `Wind speed ${windSpeed.toFixed(1)} km/h is manageable for activities.`,
-                color: "green"
-            });
+            windSeverity = "SAFE";
+            windAdvice = getActivityAdvice('wind', 'SAFE', windSpeed.toFixed(1), activity);
         }
 
-        // 4. 🌧️ Very Wet - Precipitation risks
-        if (precipitation > 10) {
-            const severity = precipitation > 25 ? "EXTREME" : precipitation > 15 ? "HIGH" : "MODERATE";
-            risks.push({
-                label: "Very Wet",
-                icon: "🌧️",
-                risk: `${severity} precipitation risk - ${precipitation.toFixed(1)} mm`,
-                advice: `Heavy rainfall ${precipitation.toFixed(1)} mm expected. Bring waterproof gear.`,
-                color: "blue"
-            });
+        risks.push({
+            label: "Very Windy",
+            icon: "💨",
+            risk: `${windSeverity !== 'SAFE' ? windSeverity + ' wind hazard' : 'No wind hazard'} - ${windSpeed.toFixed(1)} km/h`,
+            advice: windAdvice,
+            color: windSeverity === 'EXTREME' ? "red" : windSeverity === 'HIGH' ? "orange" : windSeverity === 'MODERATE' ? "yellow" : "green"
+        });
+
+        // 4. 🌧️ Very Wet - Activity-specific precipitation analysis
+        let wetSeverity, wetAdvice;
+        const wetThreshold = activity === 'outdoor_events' ? 5 : activity === 'hiking' ? 15 : 10;
+
+        if (precipitation > wetThreshold + 15) {
+            wetSeverity = "EXTREME";
+            wetAdvice = getActivityAdvice('wet', 'EXTREME', precipitation.toFixed(1), activity);
+        } else if (precipitation > wetThreshold + 5) {
+            wetSeverity = "HIGH";
+            wetAdvice = getActivityAdvice('wet', 'HIGH', precipitation.toFixed(1), activity);
+        } else if (precipitation > wetThreshold) {
+            wetSeverity = "MODERATE";
+            wetAdvice = getActivityAdvice('wet', 'MODERATE', precipitation.toFixed(1), activity);
         } else {
-            risks.push({
-                label: "Very Wet",
-                icon: "🌧️",
-                risk: `No precipitation risk - ${precipitation.toFixed(1)} mm`,
-                advice: `Light precipitation ${precipitation.toFixed(1)} mm. Minimal rain expected.`,
-                color: "green"
-            });
+            wetSeverity = "SAFE";
+            wetAdvice = getActivityAdvice('wet', 'SAFE', precipitation.toFixed(1), activity);
         }
 
-        // 5. 😰 Very Uncomfortable - Heat index and humidity
-        if (humidity > 70 && maxTemp > 25) {
-            const heatIndex = maxTemp + (0.5 * (humidity - 50));
-            const severity = heatIndex > 35 ? "EXTREME" : heatIndex > 30 ? "HIGH" : "MODERATE";
-            risks.push({
-                label: "Very Uncomfortable",
-                icon: "😰",
-                risk: `${severity} discomfort - Heat index ${heatIndex.toFixed(1)}°C`,
-                advice: `High humidity ${humidity.toFixed(0)}% makes it feel like ${heatIndex.toFixed(1)}°C. Take breaks.`,
-                color: "red"
-            });
+        risks.push({
+            label: "Very Wet",
+            icon: "🌧️",
+            risk: `${wetSeverity !== 'SAFE' ? wetSeverity + ' precipitation risk' : 'No precipitation risk'} - ${precipitation.toFixed(1)} mm`,
+            advice: wetAdvice,
+            color: wetSeverity === 'EXTREME' ? "blue" : wetSeverity === 'HIGH' ? "lightblue" : wetSeverity === 'MODERATE' ? "cyan" : "green"
+        });
+
+        // 5. 😰 Very Uncomfortable - Activity-specific comfort analysis
+        const heatIndex = maxTemp + (0.5 * (humidity - 50));
+        let comfortSeverity, comfortAdvice;
+
+        if (humidity > 80 && maxTemp > 25) {
+            comfortSeverity = "EXTREME";
+            comfortAdvice = `😰 ${activity.toUpperCase()} ALERT: Heat index ${heatIndex.toFixed(1)}°C with ${humidity.toFixed(0)}% humidity creates dangerous conditions. High risk of heat exhaustion.`;
+        } else if (humidity > 70 && maxTemp > 25) {
+            comfortSeverity = "HIGH";
+            comfortAdvice = `😰 ${activity.toUpperCase()} CAUTION: Heat index ${heatIndex.toFixed(1)}°C with ${humidity.toFixed(0)}% humidity requires frequent breaks and extra hydration.`;
+        } else if (humidity > 60 && maxTemp > 28) {
+            comfortSeverity = "MODERATE";
+            comfortAdvice = `😰 ${activity.toUpperCase()} ADVICE: Heat index ${heatIndex.toFixed(1)}°C with ${humidity.toFixed(0)}% humidity may cause discomfort. Stay hydrated.`;
         } else {
-            const heatIndex = maxTemp + (0.5 * (humidity - 50));
-            risks.push({
-                label: "Very Uncomfortable",
-                icon: "😰",
-                risk: `Comfortable conditions - Heat index ${heatIndex.toFixed(1)}°C`,
-                advice: `Humidity ${humidity.toFixed(0)}% and temperature create comfortable conditions.`,
-                color: "green"
-            });
+            comfortSeverity = "SAFE";
+            comfortAdvice = `😰 ${activity.toUpperCase()} PERFECT: Heat index ${heatIndex.toFixed(1)}°C with ${humidity.toFixed(0)}% humidity creates comfortable conditions.`;
         }
+
+        risks.push({
+            label: "Very Uncomfortable",
+            icon: "😰",
+            risk: `${comfortSeverity !== 'SAFE' ? comfortSeverity + ' discomfort' : 'Comfortable conditions'} - Heat index ${heatIndex.toFixed(1)}°C`,
+            advice: comfortAdvice,
+            color: comfortSeverity === 'EXTREME' ? "red" : comfortSeverity === 'HIGH' ? "orange" : comfortSeverity === 'MODERATE' ? "yellow" : "green"
+        });
 
         return { conditions: risks };
     };
+
+    const generateSmartAlerts = (weatherData, currentTime = new Date()) => {
+        const alerts = [];
+        const currentHour = currentTime.getHours();
+
+        if (!weatherData?.conditions) return alerts;
+
+        // Extract weather values from the conditions
+        let maxTemp = 22, minTemp = 15, windSpeed = 10, precipitation = 2, humidity = 60;
+
+        weatherData.conditions.forEach(condition => {
+            if (condition.label === "Very Hot" && condition.risk.includes("°C")) {
+                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
+                if (tempMatch) maxTemp = parseFloat(tempMatch[1]);
+            }
+            if (condition.label === "Very Wet" && condition.risk.includes("mm")) {
+                const precipMatch = condition.risk.match(/(\d+\.?\d*) mm/);
+                if (precipMatch) precipitation = parseFloat(precipMatch[1]);
+            }
+            if (condition.label === "Very Windy" && condition.risk.includes("km/h")) {
+                const windMatch = condition.risk.match(/(\d+\.?\d*) km\/h/);
+                if (windMatch) windSpeed = parseFloat(windMatch[1]);
+            }
+        });
+
+        // 🌧️ Rain-Based Smart Alerts
+        if (precipitation > 5) {
+            const rainTime = currentHour + 2; // Simulate rain in 2 hours
+            alerts.push({
+                id: 'rain_laundry',
+                icon: '👕',
+                priority: 'HIGH',
+                title: 'Laundry Alert',
+                message: `Dry your laundry now! Rain expected in 2 hours (${precipitation.toFixed(1)}mm).`,
+                action: 'Bring clothes inside',
+                timing: 'Next 2 hours',
+                category: 'household'
+            });
+
+            alerts.push({
+                id: 'rain_commute',
+                icon: '🚗',
+                priority: 'MEDIUM',
+                title: 'Commute Planning',
+                message: `Traffic will be slower due to rain. Leave 15 minutes earlier tomorrow.`,
+                action: 'Adjust departure time',
+                timing: 'Tomorrow morning',
+                category: 'transport'
+            });
+
+            if (precipitation > 15) {
+                alerts.push({
+                    id: 'rain_outdoor',
+                    icon: '⛺',
+                    priority: 'HIGH',
+                    title: 'Outdoor Activity Alert',
+                    message: `Heavy rain (${precipitation.toFixed(1)}mm) will impact outdoor plans. Consider indoor alternatives.`,
+                    action: 'Reschedule or move indoors',
+                    timing: 'Today',
+                    category: 'activity'
+                });
+            }
+        }
+
+        // 🌡️ Temperature-Based Smart Alerts
+        if (maxTemp > 30) {
+            alerts.push({
+                id: 'heat_pets',
+                icon: '🐕',
+                priority: 'HIGH',
+                title: 'Pet Safety Alert',
+                message: `${maxTemp.toFixed(1)}°C is too hot for pet walks. Walk early morning or late evening only.`,
+                action: 'Adjust pet schedule',
+                timing: 'Today',
+                category: 'safety'
+            });
+
+            alerts.push({
+                id: 'heat_car',
+                icon: '🚙',
+                priority: 'MEDIUM',
+                title: 'Vehicle Alert',
+                message: `Pre-cool your car before driving. Interior temperature can reach 50°C+.`,
+                action: 'Start AC remotely or park in shade',
+                timing: 'Before driving',
+                category: 'transport'
+            });
+
+            if (maxTemp > 35) {
+                alerts.push({
+                    id: 'heat_health',
+                    icon: '💊',
+                    priority: 'EXTREME',
+                    title: 'Health Alert',
+                    message: `Extreme heat (${maxTemp.toFixed(1)}°C)! Stay indoors 10 AM - 6 PM. Check on elderly neighbors.`,
+                    action: 'Avoid outdoor exposure',
+                    timing: 'Midday hours',
+                    category: 'health'
+                });
+            }
+        }
+
+        // 💨 Wind-Based Smart Alerts
+        if (windSpeed > 25) {
+            alerts.push({
+                id: 'wind_objects',
+                icon: '🪴',
+                priority: 'MEDIUM',
+                title: 'Secure Loose Items',
+                message: `${windSpeed.toFixed(1)} km/h winds! Secure outdoor furniture, plants, and decorations.`,
+                action: 'Move items indoors or tie down',
+                timing: 'Before winds increase',
+                category: 'property'
+            });
+
+            if (windSpeed > 40) {
+                alerts.push({
+                    id: 'wind_driving',
+                    icon: '🚛',
+                    priority: 'HIGH',
+                    title: 'Driving Hazard',
+                    message: `Strong winds (${windSpeed.toFixed(1)} km/h) affect vehicle control. Avoid highways if possible.`,
+                    action: 'Drive carefully or postpone',
+                    timing: 'When driving',
+                    category: 'transport'
+                });
+            }
+        }
+
+        // 🌫️ Fog/Visibility Alerts (simulated based on humidity + temperature)
+        if (humidity > 85 && maxTemp - minTemp < 5) {
+            alerts.push({
+                id: 'fog_commute',
+                icon: '🌫️',
+                priority: 'MEDIUM',
+                title: 'Fog Warning',
+                message: `Fog likely tomorrow morning. Leave 10 minutes earlier and use fog lights.`,
+                action: 'Adjust commute time',
+                timing: 'Tomorrow morning',
+                category: 'transport'
+            });
+        }
+
+        // 🌸 Pollen Alerts (simulated based on temperature and season)
+        const month = currentTime.getMonth();
+        const isPollenSeason = (month >= 2 && month <= 5) || (month >= 8 && month <= 10); // Spring/Fall
+
+        if (isPollenSeason && maxTemp > 15 && maxTemp < 25 && precipitation < 2) {
+            alerts.push({
+                id: 'pollen_health',
+                icon: '🌸',
+                priority: 'MEDIUM',
+                title: 'Pollen Alert',
+                message: `High pollen count expected. Take allergy medication and keep windows closed.`,
+                action: 'Take allergy precautions',
+                timing: 'Before going outside',
+                category: 'health'
+            });
+        }
+
+        // ❄️ Frost/Ice Alerts
+        if (minTemp < 2 && humidity > 70) {
+            alerts.push({
+                id: 'frost_plants',
+                icon: '🌱',
+                priority: 'MEDIUM',
+                title: 'Frost Protection',
+                message: `Frost risk tonight (${minTemp.toFixed(1)}°C). Cover sensitive plants and bring potted plants indoors.`,
+                action: 'Protect plants',
+                timing: 'Before sunset',
+                category: 'garden'
+            });
+
+            alerts.push({
+                id: 'frost_car',
+                icon: '🧊',
+                priority: 'LOW',
+                title: 'Morning Prep',
+                message: `Frost expected. Allow extra time to defrost car windows tomorrow morning.`,
+                action: 'Plan extra time',
+                timing: 'Tomorrow morning',
+                category: 'transport'
+            });
+        }
+
+        // 🏃‍♂️ Exercise/Activity Timing Alerts
+        if (maxTemp > 25) {
+            const bestTime = maxTemp > 30 ? "before 7 AM or after 7 PM" : "before 9 AM or after 6 PM";
+            alerts.push({
+                id: 'exercise_timing',
+                icon: '🏃‍♂️',
+                priority: 'LOW',
+                title: 'Exercise Timing',
+                message: `Best time for outdoor exercise: ${bestTime} to avoid heat (${maxTemp.toFixed(1)}°C).`,
+                action: 'Schedule exercise',
+                timing: 'Plan ahead',
+                category: 'fitness'
+            });
+        }
+
+        // 💧 Water Conservation Alert
+        if (precipitation < 1 && maxTemp > 28) {
+            alerts.push({
+                id: 'water_plants',
+                icon: '💧',
+                priority: 'LOW',
+                title: 'Garden Care',
+                message: `Hot and dry conditions. Water plants early morning or evening to prevent evaporation.`,
+                action: 'Water garden',
+                timing: 'Early morning/evening',
+                category: 'garden'
+            });
+        }
+
+        // Sort alerts by priority
+        const priorityOrder = { 'EXTREME': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
+        return alerts.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+    };
+
+    const generateClothingAdvice = (weatherData, activity, currentTime = new Date()) => {
+        const advice = [];
+        const currentHour = currentTime.getHours();
+
+        if (!weatherData?.conditions) return advice;
+
+        // Extract weather values
+        let maxTemp = 22, minTemp = 15, windSpeed = 10, precipitation = 2, humidity = 60;
+
+        weatherData.conditions.forEach(condition => {
+            if (condition.label === "Very Hot" && condition.risk.includes("°C")) {
+                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
+                if (tempMatch) maxTemp = parseFloat(tempMatch[1]);
+            }
+            if (condition.label === "Very Cold" && condition.risk.includes("°C")) {
+                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
+                if (tempMatch) minTemp = parseFloat(tempMatch[1]);
+            }
+            if (condition.label === "Very Wet" && condition.risk.includes("mm")) {
+                const precipMatch = condition.risk.match(/(\d+\.?\d*) mm/);
+                if (precipMatch) precipitation = parseFloat(precipMatch[1]);
+            }
+            if (condition.label === "Very Windy" && condition.risk.includes("km/h")) {
+                const windMatch = condition.risk.match(/(\d+\.?\d*) km\/h/);
+                if (windMatch) windSpeed = parseFloat(windMatch[1]);
+            }
+        });
+
+        // 🌧️ RAINFALL INTENSITY-BASED CLOTHING
+        if (precipitation > 0.5) {
+            let rainGear = "";
+            let rainIcon = "";
+
+            if (precipitation > 25) {
+                // HEAVY RAINFALL (25+ mm)
+                rainIcon = "🌧️";
+                rainGear = "HEAVY RAIN: Waterproof raincoat with sealed seams + Large umbrella + Waterproof boots + Rain pants. Avoid cotton materials.";
+            } else if (precipitation > 15) {
+                // MODERATE RAINFALL (15-25 mm)
+                rainIcon = "🌦️";
+                rainGear = "MODERATE RAIN: Raincoat with hood + Compact umbrella + Water-resistant shoes. Quick-dry clothing recommended.";
+            } else if (precipitation > 5) {
+                // LIGHT RAINFALL (5-15 mm)
+                rainIcon = "☔";
+                rainGear = "LIGHT RAIN: Light rain jacket or windbreaker + Small umbrella + Water-resistant footwear.";
+            } else {
+                // DRIZZLE (0.5-5 mm)
+                rainIcon = "🌦️";
+                rainGear = "DRIZZLE: Light jacket with hood + Optional umbrella + Regular shoes with good grip.";
+            }
+
+            advice.push({
+                category: "Rain Protection",
+                icon: rainIcon,
+                recommendation: rainGear,
+                priority: "essential"
+            });
+        }
+
+        // ☀️ SUNNY WEATHER INTENSITY-BASED CLOTHING
+        if (maxTemp > 20 && precipitation < 2) {
+            let sunGear = "";
+            let sunIcon = "";
+
+            if (maxTemp > 35) {
+                // EXTREME HEAT (35+ °C)
+                sunIcon = "🔥";
+                sunGear = "EXTREME HEAT: Wide-brimmed hat + UV-blocking sunglasses + Long-sleeve UV shirt + Cooling towel + Electrolyte drinks.";
+            } else if (maxTemp > 30) {
+                // HOT WEATHER (30-35 °C)
+                sunIcon = "☀️";
+                sunGear = "HOT WEATHER: Baseball cap or sun hat + Sunglasses + Light-colored clothing + Sunscreen SPF 30+.";
+            } else if (maxTemp > 25) {
+                // WARM WEATHER (25-30 °C)
+                sunIcon = "🌤️";
+                sunGear = "WARM WEATHER: Cap or hat + Sunglasses + Breathable fabrics + Light layers.";
+            } else {
+                // MILD SUNNY (20-25 °C)
+                sunIcon = "🌞";
+                sunGear = "MILD SUN: Optional cap + Sunglasses for bright conditions + Comfortable clothing.";
+            }
+
+            advice.push({
+                category: "Sun Protection",
+                icon: sunIcon,
+                recommendation: sunGear,
+                priority: "essential"
+            });
+        }
+
+        // 🥶 WINTER/COLD INTENSITY-BASED CLOTHING
+        if (minTemp < 15) {
+            let winterGear = "";
+            let winterIcon = "";
+
+            if (minTemp < -10) {
+                // EXTREME COLD (-10°C and below)
+                winterIcon = "🧊";
+                winterGear = "EXTREME COLD: Heavy winter coat + Thermal underwear + Insulated boots + Warm hat + Insulated gloves + Scarf + Face protection.";
+            } else if (minTemp < 0) {
+                // FREEZING (0 to -10°C)
+                winterIcon = "❄️";
+                winterGear = "FREEZING: Winter coat + Sweater + Warm boots + Beanie/winter hat + Gloves + Scarf.";
+            } else if (minTemp < 5) {
+                // VERY COLD (0-5°C)
+                winterIcon = "🥶";
+                winterGear = "VERY COLD: Heavy sweater or coat + Long pants + Closed shoes + Light gloves + Warm hat.";
+            } else if (minTemp < 10) {
+                // COLD (5-10°C)
+                winterIcon = "🧥";
+                winterGear = "COLD: Sweater or light coat + Long sleeves + Jeans or long pants + Closed shoes.";
+            } else {
+                // COOL (10-15°C)
+                winterIcon = "🧥";
+                winterGear = "COOL: Light sweater or cardigan + Long sleeves + Comfortable pants + Regular shoes.";
+            }
+
+            advice.push({
+                category: "Cold Protection",
+                icon: winterIcon,
+                recommendation: winterGear,
+                priority: "essential"
+            });
+        }
+
+        // 👕 BASE LAYER (Temperature-based)
+        let baseLayer = "";
+        if (maxTemp > 30) {
+            baseLayer = "Light, moisture-wicking t-shirt or tank top. Breathable cotton or synthetic blends.";
+        } else if (maxTemp > 20) {
+            baseLayer = "Comfortable t-shirt or light blouse. Cotton or cotton-blend materials.";
+        } else if (maxTemp > 10) {
+            baseLayer = "Long-sleeve shirt or light sweater. Layering-friendly materials.";
+        } else {
+            baseLayer = "Thermal underwear or warm base layer. Merino wool or synthetic thermal materials.";
+        }
+
+        advice.push({
+            category: "Base Layer",
+            icon: "👕",
+            recommendation: baseLayer,
+            priority: "essential"
+        });
+
+        // 💨 WIND INTENSITY-BASED CLOTHING
+        if (windSpeed > 15) {
+            let windGear = "";
+            let windIcon = "";
+
+            if (windSpeed > 40) {
+                // EXTREME WIND (40+ km/h)
+                windIcon = "🌪️";
+                windGear = "EXTREME WIND: Heavy windproof jacket + Secure hat with chin strap + Wind-resistant pants + Sturdy footwear. Avoid loose clothing.";
+            } else if (windSpeed > 30) {
+                // STRONG WIND (30-40 km/h)
+                windIcon = "💨";
+                windGear = "STRONG WIND: Windbreaker or wind-resistant jacket + Secure accessories + Avoid umbrellas + Closed shoes.";
+            } else if (windSpeed > 20) {
+                // MODERATE WIND (20-30 km/h)
+                windIcon = "🌬️";
+                windGear = "MODERATE WIND: Light windbreaker + Secure loose items + Wind-resistant materials.";
+            } else {
+                // LIGHT WIND (15-20 km/h)
+                windIcon = "🍃";
+                windGear = "LIGHT WIND: Light jacket or cardigan + Secure accessories + Comfortable layers.";
+            }
+
+            advice.push({
+                category: "Wind Protection",
+                icon: windIcon,
+                recommendation: windGear,
+                priority: "important"
+            });
+        }
+
+        // 👟 FOOTWEAR (Weather & Activity-specific)
+        let footwear = "";
+        if (precipitation > 15) {
+            footwear = "HEAVY RAIN: Waterproof rain boots + Avoid leather, suede, or canvas materials.";
+        } else if (precipitation > 5) {
+            footwear = "LIGHT RAIN: Water-resistant shoes or boots + Non-slip soles essential.";
+        } else if (minTemp < -5) {
+            footwear = "EXTREME COLD: Insulated winter boots with thermal lining + Ice grips recommended.";
+        } else if (minTemp < 5) {
+            footwear = "COLD: Warm boots or closed shoes + Thick socks + Waterproof materials.";
+        } else if (maxTemp > 35) {
+            footwear = "EXTREME HEAT: Breathable sandals or mesh sneakers + Light-colored materials.";
+        } else if (maxTemp > 28) {
+            footwear = "HOT: Breathable sneakers or sandals + Light colors to reflect heat.";
+        } else if (activity === 'hiking') {
+            footwear = "HIKING: Sturdy hiking boots with ankle support + Non-slip soles + Weather-appropriate materials.";
+        } else if (activity === 'cycling') {
+            footwear = "CYCLING: Closed-toe athletic shoes + Secure laces + Avoid sandals for safety.";
+        } else {
+            footwear = "GENERAL: Comfortable walking shoes or sneakers + Weather-appropriate materials.";
+        }
+
+        advice.push({
+            category: "Footwear",
+            icon: "👟",
+            recommendation: footwear,
+            priority: "essential"
+        });
+
+        // 🕶️ Accessories & Protection
+        const accessories = [];
+
+        if (maxTemp > 25 || currentHour >= 10 && currentHour <= 16) {
+            accessories.push("UV-protection sunglasses");
+            accessories.push("Wide-brimmed hat or cap");
+        }
+
+        if (precipitation > 2) {
+            accessories.push("Compact umbrella");
+        }
+
+        if (windSpeed > 15) {
+            accessories.push("Scarf or neck warmer");
+        }
+
+        if (minTemp < 10) {
+            accessories.push("Warm gloves or mittens");
+            accessories.push("Insulated hat or beanie");
+        }
+
+        if (maxTemp > 30) {
+            accessories.push("Cooling towel or bandana");
+        }
+
+        if (accessories.length > 0) {
+            advice.push({
+                category: "Accessories",
+                icon: "🕶️",
+                recommendation: accessories.join(", ") + ".",
+                priority: "helpful"
+            });
+        }
+
+        // 🎒 Activity-Specific Gear
+        let activityGear = "";
+        switch (activity) {
+            case 'hiking':
+                activityGear = "Backpack with water, first aid kit, trail snacks. Moisture-wicking socks essential.";
+                break;
+            case 'camping':
+                activityGear = "Weather-appropriate sleeping bag, insulated clothing layers, waterproof gear.";
+                break;
+            case 'fishing':
+                activityGear = "Quick-dry clothing, sun hat, polarized sunglasses, waterproof jacket.";
+                break;
+            case 'cycling':
+                activityGear = "Helmet, reflective clothing, padded shorts, moisture-wicking jersey.";
+                break;
+            case 'outdoor_events':
+                activityGear = "Comfortable walking shoes, layers for temperature changes, portable seating.";
+                break;
+            default:
+                activityGear = "Activity-appropriate clothing and safety gear as needed.";
+        }
+
+        advice.push({
+            category: "Activity Gear",
+            icon: "🎒",
+            recommendation: activityGear,
+            priority: "activity-specific"
+        });
+
+        // 💡 Smart Wardrobe Tips
+        const tips = [];
+
+        if (maxTemp - minTemp > 10) {
+            tips.push("Layer clothing for temperature changes throughout the day");
+        }
+
+        if (humidity > 70) {
+            tips.push("Choose breathable, moisture-wicking fabrics to stay comfortable");
+        }
+
+        if (maxTemp > 25) {
+            tips.push("Light colors reflect heat better than dark colors");
+        }
+
+        if (precipitation > 1) {
+            tips.push("Avoid white or light-colored bottoms that show water stains");
+        }
+
+        if (windSpeed > 20) {
+            tips.push("Secure loose clothing and accessories that might blow away");
+        }
+
+        if (tips.length > 0) {
+            advice.push({
+                category: "Smart Tips",
+                icon: "💡",
+                recommendation: tips.join(". ") + ".",
+                priority: "helpful"
+            });
+        }
+
+        // 📱 AR & Tech Integration Placeholder
+        advice.push({
+            category: "Tech Integration",
+            icon: "📱",
+            recommendation: "Future: Point camera at wardrobe for AI outfit suggestions based on weather conditions.",
+            priority: "future"
+        });
+
+        return advice;
+    };
+
+    const generateTimeBasedWeather = (weatherData, activity) => {
+        if (!weatherData?.conditions) return { morning: "15-22°C", afternoon: "28-35°C", evening: "20-26°C" };
+
+        // Extract actual temperatures from weather data
+        let maxTemp = 25, minTemp = 15;
+        weatherData.conditions.forEach(condition => {
+            if (condition.label === "Very Hot" && condition.risk.includes("°C")) {
+                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
+                if (tempMatch) maxTemp = parseFloat(tempMatch[1]);
+            }
+            if (condition.label === "Very Cold" && condition.risk.includes("°C")) {
+                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
+                if (tempMatch) minTemp = parseFloat(tempMatch[1]);
+            }
+        });
+
+        // Calculate time-based temperatures with activity adjustments
+        const activityAdjustments = {
+            hiking: { morning: -2, afternoon: +3, evening: -1 }, // Hiking feels cooler in morning, hotter in afternoon
+            camping: { morning: -3, afternoon: +2, evening: +1 }, // Camping overnight feels colder
+            fishing: { morning: -1, afternoon: +1, evening: 0 }, // Near water, more moderate
+            cycling: { morning: +1, afternoon: +4, evening: +2 }, // Exertion makes it feel hotter
+            outdoor_events: { morning: 0, afternoon: +2, evening: +1 } // Crowd heat effect
+        };
+
+        const adj = activityAdjustments[activity] || { morning: 0, afternoon: 0, evening: 0 };
+
+        // Calculate realistic time-based temperatures
+        const morningMin = Math.round(minTemp + adj.morning);
+        const morningMax = Math.round(minTemp + ((maxTemp - minTemp) * 0.3) + adj.morning);
+
+        const afternoonMin = Math.round(maxTemp - 3 + adj.afternoon);
+        const afternoonMax = Math.round(maxTemp + adj.afternoon);
+
+        const eveningMin = Math.round(minTemp + ((maxTemp - minTemp) * 0.4) + adj.evening);
+        const eveningMax = Math.round(maxTemp - 5 + adj.evening);
+
+        return {
+            morning: `${morningMin}-${morningMax}°C`,
+            afternoon: `${afternoonMin}-${afternoonMax}°C`,
+            evening: `${eveningMin}-${eveningMax}°C`
+        };
+    };
+
     const generateDemoWeather = (lat, lon, selectedDate) => {
         return {
             conditions: [{
@@ -651,20 +1355,237 @@ export default function HomeScreen({ location }) {
                     </View>
                 </View>
 
-                {/* Weather Analysis */}
-                {weather && (
-                    <View style={styles.weatherSection}>
-                        <Text style={styles.sectionTitle}>🌤️ Weather Analysis</Text>
-                        {weather.conditions.map((condition, index) => (
-                            <View key={index} style={[styles.conditionCard, { borderLeftColor: condition.color }]}>
-                                <View style={styles.conditionHeader}>
-                                    <Text style={styles.conditionIcon}>{condition.icon}</Text>
-                                    <Text style={styles.conditionLabel}>{condition.label}</Text>
+                {/* Smart Alerts */}
+                {smartAlerts.length > 0 && (
+                    <View style={styles.alertsSection}>
+                        <Text style={styles.sectionTitle}>🚨 Smart Weather Alerts</Text>
+                        <Text style={styles.alertsSubtitle}>Actionable insights based on weather conditions</Text>
+                        {smartAlerts.map((alert, index) => (
+                            <View key={alert.id} style={[styles.alertCard, styles[`priority${alert.priority}`]]}>
+                                <View style={styles.alertHeader}>
+                                    <Text style={styles.alertIcon}>{alert.icon}</Text>
+                                    <View style={styles.alertTitleContainer}>
+                                        <Text style={styles.alertTitle}>{alert.title}</Text>
+                                        <Text style={styles.alertPriority}>{alert.priority} PRIORITY</Text>
+                                    </View>
+                                    <Text style={styles.alertTiming}>{alert.timing}</Text>
                                 </View>
-                                <Text style={styles.conditionRisk}>{condition.risk}</Text>
-                                <Text style={styles.conditionAdvice}>{condition.advice}</Text>
+                                <Text style={styles.alertMessage}>{alert.message}</Text>
+                                <View style={styles.alertActionContainer}>
+                                    <Text style={styles.alertActionLabel}>Action:</Text>
+                                    <Text style={styles.alertAction}>{alert.action}</Text>
+                                </View>
+                                <Text style={styles.alertCategory}>#{alert.category}</Text>
                             </View>
                         ))}
+                    </View>
+                )}
+
+                {/* Clothing & Lifestyle Advisor */}
+                {clothingAdvice.length > 0 && (
+                    <View style={styles.clothingSection}>
+                        <Text style={styles.sectionTitle}>👗 Clothing & Lifestyle Advisor</Text>
+                        <Text style={styles.clothingSubtitle}>Personalized outfit recommendations based on weather & activity</Text>
+
+                        {/* Essential Recommendations */}
+                        <View style={styles.clothingCategory}>
+                            <Text style={styles.clothingCategoryTitle}>🎯 Essential Items</Text>
+                            {clothingAdvice.filter(item => item.priority === 'essential').map((item, index) => (
+                                <View key={index} style={styles.clothingItem}>
+                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                    <View style={styles.clothingContent}>
+                                        <Text style={styles.clothingLabel}>{item.category}</Text>
+                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Important Recommendations */}
+                        <View style={styles.clothingCategory}>
+                            <Text style={styles.clothingCategoryTitle}>⭐ Important Items</Text>
+                            {clothingAdvice.filter(item => item.priority === 'important').map((item, index) => (
+                                <View key={index} style={styles.clothingItem}>
+                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                    <View style={styles.clothingContent}>
+                                        <Text style={styles.clothingLabel}>{item.category}</Text>
+                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Activity-Specific Gear */}
+                        <View style={styles.clothingCategory}>
+                            <Text style={styles.clothingCategoryTitle}>🎯 Activity-Specific Gear</Text>
+                            {clothingAdvice.filter(item => item.priority === 'activity-specific').map((item, index) => (
+                                <View key={index} style={styles.clothingItem}>
+                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                    <View style={styles.clothingContent}>
+                                        <Text style={styles.clothingLabel}>{item.category}</Text>
+                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Helpful Tips & Accessories */}
+                        <View style={styles.clothingCategory}>
+                            <Text style={styles.clothingCategoryTitle}>💡 Smart Tips & Accessories</Text>
+                            {clothingAdvice.filter(item => item.priority === 'helpful').map((item, index) => (
+                                <View key={index} style={styles.clothingItem}>
+                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                    <View style={styles.clothingContent}>
+                                        <Text style={styles.clothingLabel}>{item.category}</Text>
+                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Future AR Integration */}
+                        <View style={styles.arIntegrationCard}>
+                            <Text style={styles.arTitle}>📱 Coming Soon: AR Wardrobe Assistant</Text>
+                            <Text style={styles.arDescription}>
+                                Point your camera at your wardrobe and get AI-powered outfit suggestions based on:
+                            </Text>
+                            <View style={styles.arFeatures}>
+                                <Text style={styles.arFeature}>• Real-time weather conditions</Text>
+                                <Text style={styles.arFeature}>• Your personal clothing inventory</Text>
+                                <Text style={styles.arFeature}>• Activity-specific requirements</Text>
+                                <Text style={styles.arFeature}>• Style preferences & color matching</Text>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
+                {/* Time-Based Weather Analysis */}
+                {weather && (
+                    <View style={styles.weatherSection}>
+                        <Text style={styles.sectionTitle}>🌤️ Daily Weather Timeline</Text>
+                        <Text style={styles.weatherSubtitle}>Climate conditions throughout the day for {getActivityTypes().find(a => a.key === selectedActivity)?.title || selectedActivity}</Text>
+
+                        {/* Morning Weather */}
+                        <View style={styles.timeSection}>
+                            <View style={styles.timeHeader}>
+                                <Text style={styles.timeIcon}>🌅</Text>
+                                <Text style={styles.timeTitle}>Morning (6 AM - 12 PM)</Text>
+                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).morning}</Text>
+                            </View>
+                            <View style={styles.timeWeatherGrid}>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌦️</Text>
+                                    <Text style={styles.weatherItemLabel}>Light Showers</Text>
+                                    <Text style={styles.weatherItemDesc}>Gentle rain, 2-5mm</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌧️</Text>
+                                    <Text style={styles.weatherItemLabel}>Drizzle</Text>
+                                    <Text style={styles.weatherItemDesc}>Misty conditions</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🥶</Text>
+                                    <Text style={styles.weatherItemLabel}>Cool Weather</Text>
+                                    <Text style={styles.weatherItemDesc}>Crisp morning air</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌫️</Text>
+                                    <Text style={styles.weatherItemLabel}>Morning Mist</Text>
+                                    <Text style={styles.weatherItemDesc}>Reduced visibility</Text>
+                                </View>
+                            </View>
+                            <View style={styles.timeAdvice}>
+                                <Text style={styles.timeAdviceText}>
+                                    {selectedActivity === 'hiking' && '🥾 Perfect for hiking with light rain gear. Cool morning air ideal for trail starts.'}
+                                    {selectedActivity === 'camping' && '⛺ Great time to break camp. Cool temperatures and light conditions.'}
+                                    {selectedActivity === 'fishing' && '🎣 Excellent fishing conditions. Fish are active in cooler morning waters.'}
+                                    {selectedActivity === 'cycling' && '🚴 Ideal cycling weather. Cool air perfect for long rides.'}
+                                    {selectedActivity === 'outdoor_events' && '📅 Perfect setup time for events. Comfortable working conditions.'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        {/* Afternoon Weather */}
+                        <View style={styles.timeSection}>
+                            <View style={styles.timeHeader}>
+                                <Text style={styles.timeIcon}>☀️</Text>
+                                <Text style={styles.timeTitle}>Afternoon (12 PM - 6 PM)</Text>
+                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).afternoon}</Text>
+                            </View>
+                            <View style={styles.timeWeatherGrid}>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>☀️</Text>
+                                    <Text style={styles.weatherItemLabel}>Sunny</Text>
+                                    <Text style={styles.weatherItemDesc}>Clear blue skies</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🔥</Text>
+                                    <Text style={styles.weatherItemLabel}>Heat Stroke Risk</Text>
+                                    <Text style={styles.weatherItemDesc}>Extreme heat warning</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌡️</Text>
+                                    <Text style={styles.weatherItemLabel}>Peak Heat</Text>
+                                    <Text style={styles.weatherItemDesc}>Hottest part of day</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>💧</Text>
+                                    <Text style={styles.weatherItemLabel}>High UV Index</Text>
+                                    <Text style={styles.weatherItemDesc}>Sun protection needed</Text>
+                                </View>
+                            </View>
+                            <View style={styles.timeAdvice}>
+                                <Text style={styles.timeAdviceText}>
+                                    {selectedActivity === 'hiking' && '🥾 AVOID hiking 12-4 PM. Risk of heat exhaustion on trails. Start before 7 AM.'}
+                                    {selectedActivity === 'camping' && '⛺ Stay in shade. Set up cooling systems. Avoid tent setup in direct sun.'}
+                                    {selectedActivity === 'fishing' && '🎣 Fish seek deeper, cooler waters. Focus on shaded areas and early morning spots.'}
+                                    {selectedActivity === 'cycling' && '🚴 DANGEROUS for cycling. High risk of overheating. Cycle before 8 AM only.'}
+                                    {selectedActivity === 'outdoor_events' && '📅 Provide cooling stations, shade structures, and medical support for guests.'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        {/* Evening Weather */}
+                        <View style={styles.timeSection}>
+                            <View style={styles.timeHeader}>
+                                <Text style={styles.timeIcon}>🌆</Text>
+                                <Text style={styles.timeTitle}>Evening (6 PM - 12 AM)</Text>
+                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).evening}</Text>
+                            </View>
+                            <View style={styles.timeWeatherGrid}>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌤️</Text>
+                                    <Text style={styles.weatherItemLabel}>Partly Cloudy</Text>
+                                    <Text style={styles.weatherItemDesc}>Mixed sun & clouds</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌬️</Text>
+                                    <Text style={styles.weatherItemLabel}>Cool Breeze</Text>
+                                    <Text style={styles.weatherItemDesc}>Refreshing winds</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>🌡️</Text>
+                                    <Text style={styles.weatherItemLabel}>Pleasant Temp</Text>
+                                    <Text style={styles.weatherItemDesc}>Comfortable conditions</Text>
+                                </View>
+                                <View style={styles.weatherItem}>
+                                    <Text style={styles.weatherItemIcon}>⭐</Text>
+                                    <Text style={styles.weatherItemLabel}>Clear Skies</Text>
+                                    <Text style={styles.weatherItemDesc}>Good visibility</Text>
+                                </View>
+                            </View>
+                            <View style={styles.timeAdvice}>
+                                <Text style={styles.timeAdviceText}>
+                                    {selectedActivity === 'hiking' && '🥾 Excellent for evening hikes. Cooler temperatures and beautiful sunset views.'}
+                                    {selectedActivity === 'camping' && '⛺ Perfect for campfire activities. Comfortable temperatures for outdoor cooking.'}
+                                    {selectedActivity === 'fishing' && '🎣 Prime fishing time. Fish become active again as temperatures cool.'}
+                                    {selectedActivity === 'cycling' && '🚴 Ideal cycling conditions. Cool breeze and comfortable temperatures.'}
+                                    {selectedActivity === 'outdoor_events' && '📅 Perfect for evening events. Comfortable conditions for guests and activities.'}
+                                </Text>
+                            </View>
+                        </View>
+
+
                     </View>
                 )}
 
@@ -685,13 +1606,15 @@ export default function HomeScreen({ location }) {
             </ScrollView>
 
             {/* Location Search Modal */}
-            {showLocationSearch && (
-                <LocationSearchModal
-                    visible={showLocationSearch}
-                    onClose={() => setShowLocationSearch(false)}
-                    onLocationSelect={handleLocationSelect}
-                />
-            )}
+            {
+                showLocationSearch && (
+                    <LocationSearchModal
+                        visible={showLocationSearch}
+                        onClose={() => setShowLocationSearch(false)}
+                        onLocationSelect={handleLocationSelect}
+                    />
+                )
+            }
         </View>
     );
 }
@@ -1058,5 +1981,279 @@ const styles = StyleSheet.create({
         color: '#95a5a6',
         textAlign: 'center',
         fontStyle: 'italic',
+    },
+    alertsSection: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    alertsSubtitle: {
+        fontSize: 12,
+        color: '#7f8c8d',
+        marginBottom: 12,
+        fontStyle: 'italic',
+    },
+    alertCard: {
+        borderRadius: 10,
+        padding: 14,
+        marginBottom: 10,
+        borderLeftWidth: 4,
+    },
+    priorityEXTREME: {
+        backgroundColor: '#ffebee',
+        borderLeftColor: '#e74c3c',
+    },
+    priorityHIGH: {
+        backgroundColor: '#fff3e0',
+        borderLeftColor: '#ff9800',
+    },
+    priorityMEDIUM: {
+        backgroundColor: '#f3e5f5',
+        borderLeftColor: '#9c27b0',
+    },
+    priorityLOW: {
+        backgroundColor: '#e8f5e8',
+        borderLeftColor: '#4caf50',
+    },
+    alertHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    alertIcon: {
+        fontSize: 20,
+        marginRight: 10,
+    },
+    alertTitleContainer: {
+        flex: 1,
+    },
+    alertTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#2c3e50',
+        marginBottom: 2,
+    },
+    alertPriority: {
+        fontSize: 10,
+        color: '#7f8c8d',
+        fontWeight: '600',
+        letterSpacing: 0.5,
+    },
+    alertTiming: {
+        fontSize: 11,
+        color: '#34495e',
+        fontWeight: '500',
+        backgroundColor: '#ecf0f1',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10,
+    },
+    alertMessage: {
+        fontSize: 14,
+        color: '#2c3e50',
+        lineHeight: 20,
+        marginBottom: 10,
+    },
+    alertActionContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    alertActionLabel: {
+        fontSize: 12,
+        color: '#7f8c8d',
+        fontWeight: '600',
+        marginRight: 6,
+    },
+    alertAction: {
+        fontSize: 12,
+        color: '#2980b9',
+        fontWeight: '500',
+        flex: 1,
+    },
+    alertCategory: {
+        fontSize: 10,
+        color: '#95a5a6',
+        fontStyle: 'italic',
+        alignSelf: 'flex-end',
+    },
+    weatherSubtitle: {
+        fontSize: 12,
+        color: '#7f8c8d',
+        marginBottom: 16,
+        fontStyle: 'italic',
+    },
+    timeSection: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    timeHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    timeIcon: {
+        fontSize: 24,
+        marginRight: 12,
+    },
+    timeTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#2c3e50',
+        flex: 1,
+    },
+    timeTemp: {
+        fontSize: 14,
+        color: '#e74c3c',
+        fontWeight: '600',
+        backgroundColor: '#fff5f5',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    timeWeatherGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    weatherItem: {
+        width: '48%',
+        backgroundColor: 'white',
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 8,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1,
+    },
+    weatherItemIcon: {
+        fontSize: 20,
+        marginBottom: 4,
+    },
+    weatherItemLabel: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: '#2c3e50',
+        textAlign: 'center',
+        marginBottom: 2,
+    },
+    weatherItemDesc: {
+        fontSize: 10,
+        color: '#7f8c8d',
+        textAlign: 'center',
+    },
+    timeAdvice: {
+        backgroundColor: '#e8f4fd',
+        borderRadius: 8,
+        padding: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#4a90e2',
+    },
+    timeAdviceText: {
+        fontSize: 12,
+        color: '#2c3e50',
+        lineHeight: 16,
+    },
+    clothingSection: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    clothingSubtitle: {
+        fontSize: 12,
+        color: '#7f8c8d',
+        marginBottom: 16,
+        fontStyle: 'italic',
+    },
+    clothingCategory: {
+        marginBottom: 16,
+    },
+    clothingCategoryTitle: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#2c3e50',
+        marginBottom: 10,
+        paddingBottom: 5,
+        borderBottomWidth: 1,
+        borderBottomColor: '#ecf0f1',
+    },
+    clothingItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: '#3498db',
+    },
+    clothingIcon: {
+        fontSize: 18,
+        marginRight: 12,
+        marginTop: 2,
+    },
+    clothingContent: {
+        flex: 1,
+    },
+    clothingLabel: {
+        fontSize: 13,
+        fontWeight: 'bold',
+        color: '#2c3e50',
+        marginBottom: 3,
+    },
+    clothingRecommendation: {
+        fontSize: 12,
+        color: '#34495e',
+        lineHeight: 16,
+    },
+    arIntegrationCard: {
+        backgroundColor: '#e8f4fd',
+        borderRadius: 10,
+        padding: 16,
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: '#3498db',
+        borderStyle: 'dashed',
+    },
+    arTitle: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#2980b9',
+        marginBottom: 8,
+    },
+    arDescription: {
+        fontSize: 12,
+        color: '#34495e',
+        marginBottom: 10,
+        lineHeight: 16,
+    },
+    arFeatures: {
+        paddingLeft: 8,
+    },
+    arFeature: {
+        fontSize: 11,
+        color: '#7f8c8d',
+        marginBottom: 3,
+        lineHeight: 14,
     },
 });
