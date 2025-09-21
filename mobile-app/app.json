@@ -4,10 +4,10 @@
     "slug": "climatrail-weather-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/climatrail-logo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/climatrail-logo.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#87CEEB"
     },
@@ -20,7 +20,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/climatrail-logo.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#87CEEB"
       },
       "package": "com.climatrail.app",
@@ -31,7 +31,7 @@
       "blockedPermissions": []
     },
     "web": {
-      "favicon": "./assets/climatrail-logo.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [

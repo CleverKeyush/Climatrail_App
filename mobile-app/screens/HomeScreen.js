@@ -143,7 +143,7 @@ export default function HomeScreen({ location }) {
 
             const weatherAnalysis = analyzeWeatherRisks(processedData, region.latitude, region.longitude, date, selectedActivity);
             const alerts = generateSmartAlerts(weatherAnalysis);
-            const clothing = generateClothingAdvice(weatherAnalysis, selectedActivity);
+            const clothing = generateClothingAdvice(weatherAnalysis, selectedActivity, processedData);
             setWeather(weatherAnalysis);
             setSmartAlerts(alerts);
             setClothingAdvice(clothing);
@@ -843,125 +843,220 @@ export default function HomeScreen({ location }) {
         return alerts.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
     };
 
-    const generateClothingAdvice = (weatherData, activity, currentTime = new Date()) => {
+    const generateClothingAdvice = (weatherData, activity, apiData, currentTime = new Date()) => {
         const advice = [];
         const currentHour = currentTime.getHours();
 
-        if (!weatherData?.conditions) return advice;
+        if (!weatherData?.conditions && !apiData) return advice;
 
-        // Extract weather values
+        // ENHANCED WEATHER DATA ANALYTICS - Direct API Integration
         let maxTemp = 22, minTemp = 15, windSpeed = 10, precipitation = 2, humidity = 60;
+        let dataSource = "Default";
 
-        weatherData.conditions.forEach(condition => {
-            if (condition.label === "Very Hot" && condition.risk.includes("°C")) {
-                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
-                if (tempMatch) maxTemp = parseFloat(tempMatch[1]);
+        // Enhanced validation function to filter out invalid API values
+        const isValidValue = (value, min = -100, max = 100) => {
+            if (value === null || value === undefined || isNaN(value)) return false;
+            if (value === -9999 || value === -999 || value === -99.9 || value === -999.0) return false;
+            if (value < min || value > max) return false;
+            return true;
+        };
+
+        // Priority 1: Extract from NASA POWER API (most accurate)
+        if (apiData?.nasa?.data && apiData.nasa.available) {
+            const nasaData = apiData.nasa.data;
+            const dateKey = Object.keys(nasaData.T2M_MAX || {})[0];
+            if (dateKey) {
+                const nasaMaxTemp = nasaData.T2M_MAX?.[dateKey];
+                const nasaMinTemp = nasaData.T2M_MIN?.[dateKey];
+                const nasaWindSpeed = nasaData.WS10M?.[dateKey];
+                const nasaPrecip = nasaData.PRECTOTCORR?.[dateKey];
+                const nasaHumidity = nasaData.RH2M?.[dateKey];
+
+                if (isValidValue(nasaMaxTemp, -50, 60)) maxTemp = nasaMaxTemp;
+                if (isValidValue(nasaMinTemp, -50, 60)) minTemp = nasaMinTemp;
+                if (isValidValue(nasaWindSpeed, 0, 200)) windSpeed = nasaWindSpeed;
+                if (isValidValue(nasaPrecip, 0, 500)) precipitation = nasaPrecip;
+                if (isValidValue(nasaHumidity, 0, 100)) humidity = nasaHumidity;
+
+                if (isValidValue(nasaMaxTemp) || isValidValue(nasaMinTemp)) {
+                    dataSource = "NASA POWER";
+                }
             }
-            if (condition.label === "Very Cold" && condition.risk.includes("°C")) {
-                const tempMatch = condition.risk.match(/(\d+\.?\d*)°C/);
-                if (tempMatch) minTemp = parseFloat(tempMatch[1]);
+        }
+
+        // Priority 2: Copernicus ERA5 data
+        if ((maxTemp === 22 || minTemp === 15) && apiData?.era5?.data && apiData.era5.available) {
+            const era5Data = apiData.era5.data;
+
+            if (maxTemp === 22 && isValidValue(era5Data.tempMax, -50, 60)) maxTemp = era5Data.tempMax;
+            if (minTemp === 15 && isValidValue(era5Data.tempMin, -50, 60)) minTemp = era5Data.tempMin;
+            if (windSpeed === 10 && isValidValue(era5Data.windSpeed, 0, 200)) windSpeed = era5Data.windSpeed;
+            if (precipitation === 2 && isValidValue(era5Data.precipitation, 0, 500)) precipitation = era5Data.precipitation;
+            if (humidity === 60 && isValidValue(era5Data.humidity, 0, 100)) humidity = era5Data.humidity;
+
+            if (isValidValue(era5Data.tempMax) || isValidValue(era5Data.tempMin)) {
+                dataSource = dataSource === "Default" ? "Copernicus ERA5" : dataSource + " + ERA5";
             }
-            if (condition.label === "Very Wet" && condition.risk.includes("mm")) {
-                const precipMatch = condition.risk.match(/(\d+\.?\d*) mm/);
-                if (precipMatch) precipitation = parseFloat(precipMatch[1]);
+        }
+
+        // Priority 3: Open-Meteo data
+        if ((maxTemp === 22 || minTemp === 15) && apiData?.openMeteo?.data && apiData.openMeteo.available) {
+            const omData = apiData.openMeteo.data;
+
+            if (maxTemp === 22 && isValidValue(omData.tempMax, -50, 60)) maxTemp = omData.tempMax;
+            if (minTemp === 15 && isValidValue(omData.tempMin, -50, 60)) minTemp = omData.tempMin;
+            if (windSpeed === 10 && isValidValue(omData.windSpeed, 0, 200)) windSpeed = omData.windSpeed;
+            if (precipitation === 2 && isValidValue(omData.precipitation, 0, 500)) precipitation = omData.precipitation;
+            if (humidity === 60 && isValidValue(omData.humidity, 0, 100)) humidity = omData.humidity;
+
+            if (isValidValue(omData.tempMax) || isValidValue(omData.tempMin)) {
+                dataSource = dataSource === "Default" ? "Open-Meteo" : dataSource + " + OpenMeteo";
             }
-            if (condition.label === "Very Windy" && condition.risk.includes("km/h")) {
-                const windMatch = condition.risk.match(/(\d+\.?\d*) km\/h/);
-                if (windMatch) windSpeed = parseFloat(windMatch[1]);
+        }
+
+        // Priority 4: NOAA data
+        if ((maxTemp === 22 || minTemp === 15) && apiData?.noaa?.data && apiData.noaa.available) {
+            const noaaData = apiData.noaa.data;
+
+            if (maxTemp === 22 && isValidValue(noaaData.TMAX, -50, 60)) maxTemp = noaaData.TMAX;
+            if (minTemp === 15 && isValidValue(noaaData.TMIN, -50, 60)) minTemp = noaaData.TMIN;
+            if (precipitation === 2 && isValidValue(noaaData.PRCP, 0, 500)) precipitation = noaaData.PRCP;
+
+            if (isValidValue(noaaData.TMAX) || isValidValue(noaaData.TMIN)) {
+                dataSource = dataSource === "Default" ? "NOAA NCEI" : dataSource + " + NOAA";
             }
+        }
+
+        // ADVANCED WEATHER ANALYTICS with validation
+        const heatIndex = isValidValue(maxTemp) && isValidValue(humidity) ?
+            maxTemp + (0.5 * (humidity - 50)) : maxTemp;
+        const windChill = isValidValue(minTemp) && isValidValue(windSpeed) && minTemp < 10 ?
+            minTemp - (windSpeed * 0.2) : minTemp;
+        const comfortIndex = isValidValue(maxTemp) && isValidValue(minTemp) ?
+            (maxTemp + minTemp) / 2 : 20;
+        const weatherSeverity = {
+            rain: precipitation > 25 ? 'EXTREME' : precipitation > 15 ? 'HIGH' : precipitation > 5 ? 'MODERATE' : 'LOW',
+            heat: heatIndex > 35 ? 'EXTREME' : heatIndex > 30 ? 'HIGH' : heatIndex > 25 ? 'MODERATE' : 'LOW',
+            cold: windChill < -10 ? 'EXTREME' : windChill < 0 ? 'HIGH' : windChill < 5 ? 'MODERATE' : 'LOW',
+            wind: windSpeed > 40 ? 'EXTREME' : windSpeed > 25 ? 'HIGH' : windSpeed > 15 ? 'MODERATE' : 'LOW'
+        };
+
+        // DATA ANALYTICS SUMMARY with validation
+        const formatValue = (value, unit, validRange) => {
+            return isValidValue(value, validRange[0], validRange[1]) ?
+                `${value.toFixed(1)}${unit}` : `No Data`;
+        };
+
+        const tempRange = isValidValue(minTemp, -50, 60) && isValidValue(maxTemp, -50, 60) ?
+            `${minTemp.toFixed(1)}°C-${maxTemp.toFixed(1)}°C` : 'No Data';
+
+        advice.push({
+            category: "Weather Analytics",
+            icon: "📊",
+            recommendation: `Data Source: ${dataSource}. Temp: ${tempRange}, Heat Index: ${formatValue(heatIndex, '°C', [-50, 70])}, Wind Chill: ${formatValue(windChill, '°C', [-50, 60])}, Precipitation: ${formatValue(precipitation, 'mm', [0, 500])}, Wind: ${formatValue(windSpeed, 'km/h', [0, 200])}, Humidity: ${formatValue(humidity, '%', [0, 100])}`,
+            priority: "analytics"
         });
 
-        // 🌧️ RAINFALL INTENSITY-BASED CLOTHING
+        // 🌧️ RAINFALL INTENSITY-BASED CLOTHING (Analytics-Driven)
         if (precipitation > 0.5) {
             let rainGear = "";
             let rainIcon = "";
+            const rainSeverity = weatherSeverity.rain;
 
             if (precipitation > 25) {
-                // HEAVY RAINFALL (25+ mm)
+                // HEAVY RAINFALL (25+ mm) - EXTREME SEVERITY
                 rainIcon = "🌧️";
-                rainGear = "HEAVY RAIN: Waterproof raincoat with sealed seams + Large umbrella + Waterproof boots + Rain pants. Avoid cotton materials.";
+                rainGear = `HEAVY RAINFALL (${isValidValue(precipitation, 0, 500) ? precipitation.toFixed(1) + 'mm' : 'Heavy Rain'}): Waterproof raincoat with sealed seams + Large umbrella ${isValidValue(windSpeed) && windSpeed > 20 ? '(wind-resistant design)' : ''} + Waterproof boots + Rain pants + Waterproof bag covers. Avoid cotton, denim, suede. ${isValidValue(humidity) && humidity > 85 ? 'High humidity - choose breathable waterproof materials.' : ''}`;
             } else if (precipitation > 15) {
-                // MODERATE RAINFALL (15-25 mm)
+                // MODERATE RAINFALL (15-25 mm) - HIGH SEVERITY
                 rainIcon = "🌦️";
-                rainGear = "MODERATE RAIN: Raincoat with hood + Compact umbrella + Water-resistant shoes. Quick-dry clothing recommended.";
+                rainGear = `MODERATE RAIN (${isValidValue(precipitation, 0, 500) ? precipitation.toFixed(1) + 'mm' : 'Moderate Rain'}): Raincoat with hood + Compact umbrella + Water-resistant shoes + Quick-dry clothing. ${isValidValue(windSpeed) && windSpeed > 20 ? 'Strong winds detected - secure umbrella or avoid.' : 'Light winds - umbrella safe to use.'}`;
             } else if (precipitation > 5) {
-                // LIGHT RAINFALL (5-15 mm)
+                // LIGHT RAINFALL (5-15 mm) - MODERATE SEVERITY
                 rainIcon = "☔";
-                rainGear = "LIGHT RAIN: Light rain jacket or windbreaker + Small umbrella + Water-resistant footwear.";
+                rainGear = `LIGHT RAIN (${isValidValue(precipitation, 0, 500) ? precipitation.toFixed(1) + 'mm' : 'Light Rain'}): Light rain jacket/windbreaker + Small umbrella + Water-resistant footwear. ${isValidValue(humidity) && humidity > 80 ? 'High humidity - choose breathable materials.' : 'Normal humidity levels.'}`;
             } else {
-                // DRIZZLE (0.5-5 mm)
+                // DRIZZLE (0.5-5 mm) - LOW SEVERITY
                 rainIcon = "🌦️";
-                rainGear = "DRIZZLE: Light jacket with hood + Optional umbrella + Regular shoes with good grip.";
+                rainGear = `DRIZZLE (${isValidValue(precipitation, 0, 500) ? precipitation.toFixed(1) + 'mm' : 'Light Drizzle'}): Light jacket with hood + Optional umbrella + Regular shoes with good grip. ${isValidValue(comfortIndex) && comfortIndex < 15 ? 'Cool conditions - layer appropriately.' : 'Mild conditions.'}`;
             }
 
             advice.push({
-                category: "Rain Protection",
+                category: `Rain Protection (${rainSeverity} Risk)`,
                 icon: rainIcon,
                 recommendation: rainGear,
                 priority: "essential"
             });
         }
 
-        // ☀️ SUNNY WEATHER INTENSITY-BASED CLOTHING
+        // ☀️ SUNNY WEATHER INTENSITY-BASED CLOTHING (Analytics-Driven)
         if (maxTemp > 20 && precipitation < 2) {
             let sunGear = "";
             let sunIcon = "";
+            const heatSeverity = weatherSeverity.heat;
 
             if (maxTemp > 35) {
-                // EXTREME HEAT (35+ °C)
+                // EXTREME HEAT (35+ °C) - EXTREME SEVERITY
                 sunIcon = "🔥";
-                sunGear = "EXTREME HEAT: Wide-brimmed hat + UV-blocking sunglasses + Long-sleeve UV shirt + Cooling towel + Electrolyte drinks.";
+                const tempDisplay = isValidValue(maxTemp, -50, 60) ? maxTemp.toFixed(1) + '°C' : 'Hot';
+                const heatDisplay = isValidValue(heatIndex, -50, 70) ? heatIndex.toFixed(1) + '°C' : 'Very Hot';
+                sunGear = `EXTREME HEAT (${tempDisplay}, feels like ${heatDisplay}): Wide-brimmed hat + UV-blocking sunglasses + Long-sleeve UV shirt + Cooling towel + Electrolyte drinks. ${isValidValue(humidity) && humidity > 70 ? 'High humidity increases heat stress.' : ''} ${isValidValue(windSpeed) && windSpeed < 5 ? 'No wind relief - seek AC.' : 'Light breeze provides some relief.'}`;
             } else if (maxTemp > 30) {
-                // HOT WEATHER (30-35 °C)
+                // HOT WEATHER (30-35 °C) - HIGH SEVERITY
                 sunIcon = "☀️";
-                sunGear = "HOT WEATHER: Baseball cap or sun hat + Sunglasses + Light-colored clothing + Sunscreen SPF 30+.";
+                const tempDisplay = isValidValue(maxTemp, -50, 60) ? maxTemp.toFixed(1) + '°C' : 'Hot';
+                const heatDisplay = isValidValue(heatIndex, -50, 70) ? heatIndex.toFixed(1) + '°C' : 'Hot';
+                sunGear = `HOT WEATHER (${tempDisplay}, feels like ${heatDisplay}): Baseball cap/sun hat + Sunglasses + Light-colored clothing + Sunscreen SPF 30+. ${activity === 'cycling' ? 'High exertion activity - extra cooling needed.' : ''} ${isValidValue(humidity) && humidity > 60 ? 'Moderate humidity - stay hydrated.' : ''}`;
             } else if (maxTemp > 25) {
-                // WARM WEATHER (25-30 °C)
-                sunIcon = "🌤️";
-                sunGear = "WARM WEATHER: Cap or hat + Sunglasses + Breathable fabrics + Light layers.";
+                // WARM WEATHER (25-30 °C) - MODERATE SEVERITY
+                sunIcon = "�️";
+                const tempDisplay = isValidValue(maxTemp, -50, 60) ? maxTemp.toFixed(1) + '°C' : 'Warm';
+                sunGear = `WARM WEATHER (${tempDisplay}): Cap/hat + Sunglasses + Breathable fabrics + Light layers. ${currentHour >= 10 && currentHour <= 16 ? 'Peak UV hours - extra protection needed.' : 'Lower UV exposure time.'}`;
             } else {
-                // MILD SUNNY (20-25 °C)
+                // MILD SUNNY (20-25 °C) - LOW SEVERITY
                 sunIcon = "🌞";
-                sunGear = "MILD SUN: Optional cap + Sunglasses for bright conditions + Comfortable clothing.";
+                const tempDisplay = isValidValue(maxTemp, -50, 60) ? maxTemp.toFixed(1) + '°C' : 'Mild';
+                sunGear = `MILD SUN (${tempDisplay}): Optional cap + Sunglasses for bright conditions + Comfortable clothing. ${isValidValue(windSpeed) && windSpeed > 10 ? 'Breezy conditions - light layers recommended.' : 'Calm conditions.'}`;
             }
 
             advice.push({
-                category: "Sun Protection",
+                category: `Sun Protection (${heatSeverity} Risk)`,
                 icon: sunIcon,
                 recommendation: sunGear,
                 priority: "essential"
             });
         }
 
-        // 🥶 WINTER/COLD INTENSITY-BASED CLOTHING
+        // 🥶 WINTER/COLD INTENSITY-BASED CLOTHING (Analytics-Driven)
         if (minTemp < 15) {
             let winterGear = "";
             let winterIcon = "";
+            const coldSeverity = weatherSeverity.cold;
 
             if (minTemp < -10) {
-                // EXTREME COLD (-10°C and below)
+                // EXTREME COLD (-10°C and below) - EXTREME SEVERITY
                 winterIcon = "🧊";
-                winterGear = "EXTREME COLD: Heavy winter coat + Thermal underwear + Insulated boots + Warm hat + Insulated gloves + Scarf + Face protection.";
+                winterGear = `EXTREME COLD (${minTemp.toFixed(1)}°C, feels like ${windChill.toFixed(1)}°C): Heavy winter coat + Thermal underwear + Insulated boots + Warm hat + Insulated gloves + Scarf + Face protection. ${windSpeed > 20 ? 'Strong winds increase frostbite risk.' : ''} ${humidity > 80 ? 'High humidity may cause ice formation.' : ''}`;
             } else if (minTemp < 0) {
-                // FREEZING (0 to -10°C)
+                // FREEZING (0 to -10°C) - HIGH SEVERITY
                 winterIcon = "❄️";
-                winterGear = "FREEZING: Winter coat + Sweater + Warm boots + Beanie/winter hat + Gloves + Scarf.";
+                winterGear = `FREEZING (${minTemp.toFixed(1)}°C, feels like ${windChill.toFixed(1)}°C): Winter coat + Sweater + Warm boots + Beanie/winter hat + Gloves + Scarf. ${activity === 'hiking' ? 'Trail conditions may be icy - proper footwear essential.' : ''} ${windSpeed > 15 ? 'Wind chill factor significant.' : ''}`;
             } else if (minTemp < 5) {
-                // VERY COLD (0-5°C)
+                // VERY COLD (0-5°C) - MODERATE SEVERITY
                 winterIcon = "🥶";
-                winterGear = "VERY COLD: Heavy sweater or coat + Long pants + Closed shoes + Light gloves + Warm hat.";
+                winterGear = `VERY COLD (${minTemp.toFixed(1)}°C, feels like ${windChill.toFixed(1)}°C): Heavy sweater/coat + Long pants + Closed shoes + Light gloves + Warm hat. ${humidity > 70 ? 'High humidity may feel colder.' : ''} ${maxTemp - minTemp > 15 ? 'Large temperature range - layer clothing.' : ''}`;
             } else if (minTemp < 10) {
-                // COLD (5-10°C)
+                // COLD (5-10°C) - MODERATE SEVERITY
                 winterIcon = "🧥";
-                winterGear = "COLD: Sweater or light coat + Long sleeves + Jeans or long pants + Closed shoes.";
+                winterGear = `COLD (${minTemp.toFixed(1)}°C): Sweater/light coat + Long sleeves + Jeans/long pants + Closed shoes. ${windSpeed > 20 ? 'Windy conditions - windproof outer layer recommended.' : ''} ${activity === 'cycling' ? 'Wind chill from movement - extra protection needed.' : ''}`;
             } else {
-                // COOL (10-15°C)
+                // COOL (10-15°C) - LOW SEVERITY
                 winterIcon = "🧥";
-                winterGear = "COOL: Light sweater or cardigan + Long sleeves + Comfortable pants + Regular shoes.";
+                winterGear = `COOL (${minTemp.toFixed(1)}°C): Light sweater/cardigan + Long sleeves + Comfortable pants + Regular shoes. ${maxTemp > 20 ? 'Temperature will rise - layering recommended.' : 'Stable cool conditions.'}`;
             }
 
             advice.push({
-                category: "Cold Protection",
+                category: `Cold Protection (${coldSeverity} Risk)`,
                 icon: winterIcon,
                 recommendation: winterGear,
                 priority: "essential"
@@ -1218,54 +1313,82 @@ export default function HomeScreen({ location }) {
     return (
         <View style={styles.container}>
             <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-                {/* Header */}
+                {/* Enhanced Header */}
                 <View style={styles.headerContainer}>
-                    <View style={styles.logoContainer}>
-                        <View style={styles.logoCircle}>
-                            <Text style={styles.logoText}>🌤️</Text>
-                        </View>
-                        <View style={styles.headerTextContainer}>
-                            <Text style={styles.headerTitle}>Climatrail</Text>
-                            <Text style={styles.headerSubtitle}>WEATHER INTELLIGENCE</Text>
+                    <View style={styles.headerBackground}>
+                        <View style={styles.headerGradientOverlay} />
+                        <View style={styles.logoContainer}>
+                            <View style={styles.logoCircle}>
+                                <Text style={styles.logoText}>🌤️</Text>
+                                <View style={styles.logoGlow} />
+                            </View>
+                            <View style={styles.headerTextContainer}>
+                                <Text style={styles.headerTitle}>Climatrail</Text>
+                                <Text style={styles.headerSubtitle}>WEATHER INTELLIGENCE</Text>
+                            </View>
                         </View>
                     </View>
                 </View>
 
-                {/* Location Info */}
+                {/* Enhanced Location Info */}
                 <View style={styles.locationInfo}>
-                    <View style={styles.locationHeader}>
-                        <Text style={styles.locationLabel}>
-                            📍 {isManualLocation ? 'Selected Location' : 'Current Location'}
-                        </Text>
+                    <View style={styles.locationCard}>
+                        <View style={styles.locationIconContainer}>
+                            <Text style={styles.locationIcon}>📍</Text>
+                            <View style={styles.locationPulse} />
+                        </View>
+                        <View style={styles.locationContent}>
+                            <View style={styles.locationHeader}>
+                                <Text style={styles.locationLabel}>
+                                    {isManualLocation ? 'Selected Location' : 'Current Location'}
+                                </Text>
+                                <View style={styles.locationStatus}>
+                                    <View style={[styles.statusDot, { backgroundColor: isManualLocation ? '#f39c12' : '#27ae60' }]} />
+                                    <Text style={styles.statusText}>{isManualLocation ? 'Manual' : 'GPS'}</Text>
+                                </View>
+                            </View>
+                            <Text style={styles.locationText}>
+                                {locationName || `${region.latitude.toFixed(4)}, ${region.longitude.toFixed(4)}`}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.locationActions}>
                         <TouchableOpacity
-                            style={styles.searchLocationBtn}
+                            style={[styles.locationActionBtn, styles.searchBtn]}
                             onPress={() => setShowLocationSearch(true)}
                         >
-                            <Text style={styles.searchLocationBtnText}>🗺️ Search</Text>
+                            <Text style={styles.actionBtnIcon}>🗺️</Text>
+                            <Text style={styles.actionBtnText}>Search</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.locationActionBtn, styles.gpsBtn, locationLoading && styles.loadingBtn]}
+                            onPress={handleUseCurrentLocation}
+                            disabled={locationLoading}
+                        >
+                            <Text style={styles.actionBtnIcon}>{locationLoading ? '⟳' : '📍'}</Text>
+                            <Text style={styles.actionBtnText}>
+                                {locationLoading ? 'Getting GPS...' : 'Use GPS'}
+                            </Text>
                         </TouchableOpacity>
                     </View>
-                    <Text style={styles.locationText}>
-                        {locationName || `${region.latitude.toFixed(4)}, ${region.longitude.toFixed(4)}`}
-                    </Text>
-                    <TouchableOpacity
-                        style={styles.useGPSBtn}
-                        onPress={handleUseCurrentLocation}
-                        disabled={locationLoading}
-                    >
-                        <Text style={styles.useGPSBtnText}>
-                            {locationLoading ? '⟳ Getting GPS...' : '📍 Use GPS'}
-                        </Text>
-                    </TouchableOpacity>
                 </View>
 
-                {/* Enhanced Date Selection */}
+                {/* Premium Date Selection */}
                 <View style={styles.dateSection}>
-                    <View style={styles.dateSectionHeader}>
-                        <Text style={styles.sectionTitle}>📅 Date Selection</Text>
-                        <View style={styles.selectedDateInfo}>
-                            <Text style={styles.selectedDateLabel}>Selected:</Text>
+                    <View style={styles.sectionHeader}>
+                        <View style={styles.sectionTitleContainer}>
+                            <View style={styles.sectionIconContainer}>
+                                <Text style={styles.sectionIcon}>📅</Text>
+                            </View>
+                            <View>
+                                <Text style={styles.sectionTitle}>Date Selection</Text>
+                                <Text style={styles.sectionSubtitle}>Choose your adventure date</Text>
+                            </View>
+                        </View>
+                        <View style={styles.selectedDateBadge}>
+                            <Text style={styles.selectedDateLabel}>Selected</Text>
                             <Text style={styles.selectedDateText}>
-                                {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                                {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </Text>
                         </View>
                     </View>
@@ -1334,23 +1457,56 @@ export default function HomeScreen({ location }) {
                         />
                     )}
                 </View>
-                {/* Activity Selection */}
+                {/* Premium Activity Selection */}
                 <View style={styles.activitySection}>
-                    <Text style={styles.sectionTitle}>🎯 Activity Selection</Text>
+                    <View style={styles.sectionHeader}>
+                        <View style={styles.sectionTitleContainer}>
+                            <View style={styles.sectionIconContainer}>
+                                <Text style={styles.sectionIcon}>🎯</Text>
+                            </View>
+                            <View>
+                                <Text style={styles.sectionTitle}>Activity Selection</Text>
+                                <Text style={styles.sectionSubtitle}>Personalized weather analysis</Text>
+                            </View>
+                        </View>
+                        <View style={styles.activityCounter}>
+                            <Text style={styles.counterText}>5 Activities</Text>
+                        </View>
+                    </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.activityScroll}>
                         {getActivityTypes().map((activity) => (
                             <TouchableOpacity
                                 key={activity.key}
-                                style={[styles.activityCard, selectedActivity === activity.key && styles.activityCardSelected]}
+                                style={[
+                                    styles.activityCard,
+                                    selectedActivity === activity.key && styles.activityCardSelected
+                                ]}
                                 onPress={() => setSelectedActivity(activity.key)}
                             >
-                                <Text style={styles.activityIcon}>{activity.icon}</Text>
+                                <View style={styles.activityCardHeader}>
+                                    <Text style={styles.activityIcon}>{activity.icon}</Text>
+                                    {selectedActivity === activity.key && (
+                                        <View style={styles.selectedBadge}>
+                                            <Text style={styles.selectedBadgeText}>✓</Text>
+                                        </View>
+                                    )}
+                                </View>
                                 <Text style={styles.activityTitle}>{activity.title}</Text>
                                 <Text style={styles.activityDescription}>{activity.description}</Text>
+                                <View style={styles.activityFooter}>
+                                    <View style={styles.activityDots}>
+                                        <View style={[styles.dot, selectedActivity === activity.key && styles.activeDot]} />
+                                        <View style={[styles.dot, selectedActivity === activity.key && styles.activeDot]} />
+                                        <View style={[styles.dot, selectedActivity === activity.key && styles.activeDot]} />
+                                    </View>
+                                </View>
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
-                    <View style={styles.activityTip}>
+                    <View style={styles.activityInsight}>
+                        <View style={styles.insightIcon}>
+                            <Text style={styles.insightEmoji}>💡</Text>
+                        </View>
                         <Text style={styles.activityTipText}>{getActivityTip(selectedActivity)}</Text>
                     </View>
                 </View>
@@ -1379,221 +1535,242 @@ export default function HomeScreen({ location }) {
                             </View>
                         ))}
                     </View>
-                )}
+                )
+                }
 
                 {/* Clothing & Lifestyle Advisor */}
-                {clothingAdvice.length > 0 && (
-                    <View style={styles.clothingSection}>
-                        <Text style={styles.sectionTitle}>👗 Clothing & Lifestyle Advisor</Text>
-                        <Text style={styles.clothingSubtitle}>Personalized outfit recommendations based on weather & activity</Text>
+                {
+                    clothingAdvice.length > 0 && (
+                        <View style={styles.clothingSection}>
+                            <Text style={styles.sectionTitle}>👗 Clothing & Lifestyle Advisor</Text>
+                            <Text style={styles.clothingSubtitle}>Personalized outfit recommendations based on weather & activity</Text>
 
-                        {/* Essential Recommendations */}
-                        <View style={styles.clothingCategory}>
-                            <Text style={styles.clothingCategoryTitle}>🎯 Essential Items</Text>
-                            {clothingAdvice.filter(item => item.priority === 'essential').map((item, index) => (
-                                <View key={index} style={styles.clothingItem}>
-                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
-                                    <View style={styles.clothingContent}>
-                                        <Text style={styles.clothingLabel}>{item.category}</Text>
-                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                            {/* Weather Data Analytics */}
+                            <View style={styles.clothingCategory}>
+                                <Text style={styles.clothingCategoryTitle}>📊 Weather Data Analytics</Text>
+                                {clothingAdvice.filter(item => item.priority === 'analytics').map((item, index) => (
+                                    <View key={index} style={[styles.clothingItem, styles.analyticsItem]}>
+                                        <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                        <View style={styles.clothingContent}>
+                                            <Text style={styles.clothingLabel}>{item.category}</Text>
+                                            <Text style={styles.analyticsRecommendation}>{item.recommendation}</Text>
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
-                        </View>
+                                ))}
+                            </View>
 
-                        {/* Important Recommendations */}
-                        <View style={styles.clothingCategory}>
-                            <Text style={styles.clothingCategoryTitle}>⭐ Important Items</Text>
-                            {clothingAdvice.filter(item => item.priority === 'important').map((item, index) => (
-                                <View key={index} style={styles.clothingItem}>
-                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
-                                    <View style={styles.clothingContent}>
-                                        <Text style={styles.clothingLabel}>{item.category}</Text>
-                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                            {/* Essential Recommendations */}
+                            <View style={styles.clothingCategory}>
+                                <Text style={styles.clothingCategoryTitle}>🎯 Essential Items</Text>
+                                {clothingAdvice.filter(item => item.priority === 'essential').map((item, index) => (
+                                    <View key={index} style={styles.clothingItem}>
+                                        <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                        <View style={styles.clothingContent}>
+                                            <Text style={styles.clothingLabel}>{item.category}</Text>
+                                            <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
-                        </View>
+                                ))}
+                            </View>
 
-                        {/* Activity-Specific Gear */}
-                        <View style={styles.clothingCategory}>
-                            <Text style={styles.clothingCategoryTitle}>🎯 Activity-Specific Gear</Text>
-                            {clothingAdvice.filter(item => item.priority === 'activity-specific').map((item, index) => (
-                                <View key={index} style={styles.clothingItem}>
-                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
-                                    <View style={styles.clothingContent}>
-                                        <Text style={styles.clothingLabel}>{item.category}</Text>
-                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                            {/* Important Recommendations */}
+                            <View style={styles.clothingCategory}>
+                                <Text style={styles.clothingCategoryTitle}>⭐ Important Items</Text>
+                                {clothingAdvice.filter(item => item.priority === 'important').map((item, index) => (
+                                    <View key={index} style={styles.clothingItem}>
+                                        <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                        <View style={styles.clothingContent}>
+                                            <Text style={styles.clothingLabel}>{item.category}</Text>
+                                            <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
-                        </View>
+                                ))}
+                            </View>
 
-                        {/* Helpful Tips & Accessories */}
-                        <View style={styles.clothingCategory}>
-                            <Text style={styles.clothingCategoryTitle}>💡 Smart Tips & Accessories</Text>
-                            {clothingAdvice.filter(item => item.priority === 'helpful').map((item, index) => (
-                                <View key={index} style={styles.clothingItem}>
-                                    <Text style={styles.clothingIcon}>{item.icon}</Text>
-                                    <View style={styles.clothingContent}>
-                                        <Text style={styles.clothingLabel}>{item.category}</Text>
-                                        <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                            {/* Activity-Specific Gear */}
+                            <View style={styles.clothingCategory}>
+                                <Text style={styles.clothingCategoryTitle}>🎯 Activity-Specific Gear</Text>
+                                {clothingAdvice.filter(item => item.priority === 'activity-specific').map((item, index) => (
+                                    <View key={index} style={styles.clothingItem}>
+                                        <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                        <View style={styles.clothingContent}>
+                                            <Text style={styles.clothingLabel}>{item.category}</Text>
+                                            <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
-                        </View>
+                                ))}
+                            </View>
 
-                        {/* Future AR Integration */}
-                        <View style={styles.arIntegrationCard}>
-                            <Text style={styles.arTitle}>📱 Coming Soon: AR Wardrobe Assistant</Text>
-                            <Text style={styles.arDescription}>
-                                Point your camera at your wardrobe and get AI-powered outfit suggestions based on:
-                            </Text>
-                            <View style={styles.arFeatures}>
-                                <Text style={styles.arFeature}>• Real-time weather conditions</Text>
-                                <Text style={styles.arFeature}>• Your personal clothing inventory</Text>
-                                <Text style={styles.arFeature}>• Activity-specific requirements</Text>
-                                <Text style={styles.arFeature}>• Style preferences & color matching</Text>
+                            {/* Helpful Tips & Accessories */}
+                            <View style={styles.clothingCategory}>
+                                <Text style={styles.clothingCategoryTitle}>💡 Smart Tips & Accessories</Text>
+                                {clothingAdvice.filter(item => item.priority === 'helpful').map((item, index) => (
+                                    <View key={index} style={styles.clothingItem}>
+                                        <Text style={styles.clothingIcon}>{item.icon}</Text>
+                                        <View style={styles.clothingContent}>
+                                            <Text style={styles.clothingLabel}>{item.category}</Text>
+                                            <Text style={styles.clothingRecommendation}>{item.recommendation}</Text>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+
+                            {/* Future AR Integration */}
+                            <View style={styles.arIntegrationCard}>
+                                <Text style={styles.arTitle}>📱 Coming Soon: AR Wardrobe Assistant</Text>
+                                <Text style={styles.arDescription}>
+                                    Point your camera at your wardrobe and get AI-powered outfit suggestions based on:
+                                </Text>
+                                <View style={styles.arFeatures}>
+                                    <Text style={styles.arFeature}>• Real-time weather conditions</Text>
+                                    <Text style={styles.arFeature}>• Your personal clothing inventory</Text>
+                                    <Text style={styles.arFeature}>• Activity-specific requirements</Text>
+                                    <Text style={styles.arFeature}>• Style preferences & color matching</Text>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                )}
+                    )
+                }
 
                 {/* Time-Based Weather Analysis */}
-                {weather && (
-                    <View style={styles.weatherSection}>
-                        <Text style={styles.sectionTitle}>🌤️ Daily Weather Timeline</Text>
-                        <Text style={styles.weatherSubtitle}>Climate conditions throughout the day for {getActivityTypes().find(a => a.key === selectedActivity)?.title || selectedActivity}</Text>
+                {
+                    weather && (
+                        <View style={styles.weatherSection}>
+                            <Text style={styles.sectionTitle}>🌤️ Daily Weather Timeline</Text>
+                            <Text style={styles.weatherSubtitle}>Climate conditions throughout the day for {getActivityTypes().find(a => a.key === selectedActivity)?.title || selectedActivity}</Text>
 
-                        {/* Morning Weather */}
-                        <View style={styles.timeSection}>
-                            <View style={styles.timeHeader}>
-                                <Text style={styles.timeIcon}>🌅</Text>
-                                <Text style={styles.timeTitle}>Morning (6 AM - 12 PM)</Text>
-                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).morning}</Text>
+                            {/* Morning Weather */}
+                            <View style={styles.timeSection}>
+                                <View style={styles.timeHeader}>
+                                    <Text style={styles.timeIcon}>🌅</Text>
+                                    <Text style={styles.timeTitle}>Morning (6 AM - 12 PM)</Text>
+                                    <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).morning}</Text>
+                                </View>
+                                <View style={styles.timeWeatherGrid}>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌦️</Text>
+                                        <Text style={styles.weatherItemLabel}>Light Showers</Text>
+                                        <Text style={styles.weatherItemDesc}>Gentle rain, 2-5mm</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌧️</Text>
+                                        <Text style={styles.weatherItemLabel}>Drizzle</Text>
+                                        <Text style={styles.weatherItemDesc}>Misty conditions</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🥶</Text>
+                                        <Text style={styles.weatherItemLabel}>Cool Weather</Text>
+                                        <Text style={styles.weatherItemDesc}>Crisp morning air</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌫️</Text>
+                                        <Text style={styles.weatherItemLabel}>Morning Mist</Text>
+                                        <Text style={styles.weatherItemDesc}>Reduced visibility</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.timeAdvice}>
+                                    <Text style={styles.timeAdviceText}>
+                                        {selectedActivity === 'hiking' && '🥾 Perfect for hiking with light rain gear. Cool morning air ideal for trail starts.'}
+                                        {selectedActivity === 'camping' && '⛺ Great time to break camp. Cool temperatures and light conditions.'}
+                                        {selectedActivity === 'fishing' && '🎣 Excellent fishing conditions. Fish are active in cooler morning waters.'}
+                                        {selectedActivity === 'cycling' && '🚴 Ideal cycling weather. Cool air perfect for long rides.'}
+                                        {selectedActivity === 'outdoor_events' && '📅 Perfect setup time for events. Comfortable working conditions.'}
+                                    </Text>
+                                </View>
                             </View>
-                            <View style={styles.timeWeatherGrid}>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌦️</Text>
-                                    <Text style={styles.weatherItemLabel}>Light Showers</Text>
-                                    <Text style={styles.weatherItemDesc}>Gentle rain, 2-5mm</Text>
+
+                            {/* Afternoon Weather */}
+                            <View style={styles.timeSection}>
+                                <View style={styles.timeHeader}>
+                                    <Text style={styles.timeIcon}>☀️</Text>
+                                    <Text style={styles.timeTitle}>Afternoon (12 PM - 6 PM)</Text>
+                                    <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).afternoon}</Text>
                                 </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌧️</Text>
-                                    <Text style={styles.weatherItemLabel}>Drizzle</Text>
-                                    <Text style={styles.weatherItemDesc}>Misty conditions</Text>
+                                <View style={styles.timeWeatherGrid}>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>☀️</Text>
+                                        <Text style={styles.weatherItemLabel}>Sunny</Text>
+                                        <Text style={styles.weatherItemDesc}>Clear blue skies</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🔥</Text>
+                                        <Text style={styles.weatherItemLabel}>Heat Stroke Risk</Text>
+                                        <Text style={styles.weatherItemDesc}>Extreme heat warning</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌡️</Text>
+                                        <Text style={styles.weatherItemLabel}>Peak Heat</Text>
+                                        <Text style={styles.weatherItemDesc}>Hottest part of day</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>💧</Text>
+                                        <Text style={styles.weatherItemLabel}>High UV Index</Text>
+                                        <Text style={styles.weatherItemDesc}>Sun protection needed</Text>
+                                    </View>
                                 </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🥶</Text>
-                                    <Text style={styles.weatherItemLabel}>Cool Weather</Text>
-                                    <Text style={styles.weatherItemDesc}>Crisp morning air</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌫️</Text>
-                                    <Text style={styles.weatherItemLabel}>Morning Mist</Text>
-                                    <Text style={styles.weatherItemDesc}>Reduced visibility</Text>
+                                <View style={styles.timeAdvice}>
+                                    <Text style={styles.timeAdviceText}>
+                                        {selectedActivity === 'hiking' && '🥾 AVOID hiking 12-4 PM. Risk of heat exhaustion on trails. Start before 7 AM.'}
+                                        {selectedActivity === 'camping' && '⛺ Stay in shade. Set up cooling systems. Avoid tent setup in direct sun.'}
+                                        {selectedActivity === 'fishing' && '🎣 Fish seek deeper, cooler waters. Focus on shaded areas and early morning spots.'}
+                                        {selectedActivity === 'cycling' && '🚴 DANGEROUS for cycling. High risk of overheating. Cycle before 8 AM only.'}
+                                        {selectedActivity === 'outdoor_events' && '📅 Provide cooling stations, shade structures, and medical support for guests.'}
+                                    </Text>
                                 </View>
                             </View>
-                            <View style={styles.timeAdvice}>
-                                <Text style={styles.timeAdviceText}>
-                                    {selectedActivity === 'hiking' && '🥾 Perfect for hiking with light rain gear. Cool morning air ideal for trail starts.'}
-                                    {selectedActivity === 'camping' && '⛺ Great time to break camp. Cool temperatures and light conditions.'}
-                                    {selectedActivity === 'fishing' && '🎣 Excellent fishing conditions. Fish are active in cooler morning waters.'}
-                                    {selectedActivity === 'cycling' && '🚴 Ideal cycling weather. Cool air perfect for long rides.'}
-                                    {selectedActivity === 'outdoor_events' && '📅 Perfect setup time for events. Comfortable working conditions.'}
-                                </Text>
+
+                            {/* Evening Weather */}
+                            <View style={styles.timeSection}>
+                                <View style={styles.timeHeader}>
+                                    <Text style={styles.timeIcon}>🌆</Text>
+                                    <Text style={styles.timeTitle}>Evening (6 PM - 12 AM)</Text>
+                                    <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).evening}</Text>
+                                </View>
+                                <View style={styles.timeWeatherGrid}>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌤️</Text>
+                                        <Text style={styles.weatherItemLabel}>Partly Cloudy</Text>
+                                        <Text style={styles.weatherItemDesc}>Mixed sun & clouds</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌬️</Text>
+                                        <Text style={styles.weatherItemLabel}>Cool Breeze</Text>
+                                        <Text style={styles.weatherItemDesc}>Refreshing winds</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>🌡️</Text>
+                                        <Text style={styles.weatherItemLabel}>Pleasant Temp</Text>
+                                        <Text style={styles.weatherItemDesc}>Comfortable conditions</Text>
+                                    </View>
+                                    <View style={styles.weatherItem}>
+                                        <Text style={styles.weatherItemIcon}>⭐</Text>
+                                        <Text style={styles.weatherItemLabel}>Clear Skies</Text>
+                                        <Text style={styles.weatherItemDesc}>Good visibility</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.timeAdvice}>
+                                    <Text style={styles.timeAdviceText}>
+                                        {selectedActivity === 'hiking' && '🥾 Excellent for evening hikes. Cooler temperatures and beautiful sunset views.'}
+                                        {selectedActivity === 'camping' && '⛺ Perfect for campfire activities. Comfortable temperatures for outdoor cooking.'}
+                                        {selectedActivity === 'fishing' && '🎣 Prime fishing time. Fish become active again as temperatures cool.'}
+                                        {selectedActivity === 'cycling' && '🚴 Ideal cycling conditions. Cool breeze and comfortable temperatures.'}
+                                        {selectedActivity === 'outdoor_events' && '📅 Perfect for evening events. Comfortable conditions for guests and activities.'}
+                                    </Text>
+                                </View>
                             </View>
+
+
                         </View>
+                    )
+                }
 
-                        {/* Afternoon Weather */}
-                        <View style={styles.timeSection}>
-                            <View style={styles.timeHeader}>
-                                <Text style={styles.timeIcon}>☀️</Text>
-                                <Text style={styles.timeTitle}>Afternoon (12 PM - 6 PM)</Text>
-                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).afternoon}</Text>
-                            </View>
-                            <View style={styles.timeWeatherGrid}>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>☀️</Text>
-                                    <Text style={styles.weatherItemLabel}>Sunny</Text>
-                                    <Text style={styles.weatherItemDesc}>Clear blue skies</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🔥</Text>
-                                    <Text style={styles.weatherItemLabel}>Heat Stroke Risk</Text>
-                                    <Text style={styles.weatherItemDesc}>Extreme heat warning</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌡️</Text>
-                                    <Text style={styles.weatherItemLabel}>Peak Heat</Text>
-                                    <Text style={styles.weatherItemDesc}>Hottest part of day</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>💧</Text>
-                                    <Text style={styles.weatherItemLabel}>High UV Index</Text>
-                                    <Text style={styles.weatherItemDesc}>Sun protection needed</Text>
-                                </View>
-                            </View>
-                            <View style={styles.timeAdvice}>
-                                <Text style={styles.timeAdviceText}>
-                                    {selectedActivity === 'hiking' && '🥾 AVOID hiking 12-4 PM. Risk of heat exhaustion on trails. Start before 7 AM.'}
-                                    {selectedActivity === 'camping' && '⛺ Stay in shade. Set up cooling systems. Avoid tent setup in direct sun.'}
-                                    {selectedActivity === 'fishing' && '🎣 Fish seek deeper, cooler waters. Focus on shaded areas and early morning spots.'}
-                                    {selectedActivity === 'cycling' && '🚴 DANGEROUS for cycling. High risk of overheating. Cycle before 8 AM only.'}
-                                    {selectedActivity === 'outdoor_events' && '📅 Provide cooling stations, shade structures, and medical support for guests.'}
-                                </Text>
-                            </View>
+                {
+                    loading && (
+                        <View style={styles.loadingContainer}>
+                            <Text style={styles.loadingText}>⟳ Loading weather data...</Text>
                         </View>
-
-                        {/* Evening Weather */}
-                        <View style={styles.timeSection}>
-                            <View style={styles.timeHeader}>
-                                <Text style={styles.timeIcon}>🌆</Text>
-                                <Text style={styles.timeTitle}>Evening (6 PM - 12 AM)</Text>
-                                <Text style={styles.timeTemp}>{generateTimeBasedWeather(weather, selectedActivity).evening}</Text>
-                            </View>
-                            <View style={styles.timeWeatherGrid}>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌤️</Text>
-                                    <Text style={styles.weatherItemLabel}>Partly Cloudy</Text>
-                                    <Text style={styles.weatherItemDesc}>Mixed sun & clouds</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌬️</Text>
-                                    <Text style={styles.weatherItemLabel}>Cool Breeze</Text>
-                                    <Text style={styles.weatherItemDesc}>Refreshing winds</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>🌡️</Text>
-                                    <Text style={styles.weatherItemLabel}>Pleasant Temp</Text>
-                                    <Text style={styles.weatherItemDesc}>Comfortable conditions</Text>
-                                </View>
-                                <View style={styles.weatherItem}>
-                                    <Text style={styles.weatherItemIcon}>⭐</Text>
-                                    <Text style={styles.weatherItemLabel}>Clear Skies</Text>
-                                    <Text style={styles.weatherItemDesc}>Good visibility</Text>
-                                </View>
-                            </View>
-                            <View style={styles.timeAdvice}>
-                                <Text style={styles.timeAdviceText}>
-                                    {selectedActivity === 'hiking' && '🥾 Excellent for evening hikes. Cooler temperatures and beautiful sunset views.'}
-                                    {selectedActivity === 'camping' && '⛺ Perfect for campfire activities. Comfortable temperatures for outdoor cooking.'}
-                                    {selectedActivity === 'fishing' && '🎣 Prime fishing time. Fish become active again as temperatures cool.'}
-                                    {selectedActivity === 'cycling' && '🚴 Ideal cycling conditions. Cool breeze and comfortable temperatures.'}
-                                    {selectedActivity === 'outdoor_events' && '📅 Perfect for evening events. Comfortable conditions for guests and activities.'}
-                                </Text>
-                            </View>
-                        </View>
-
-
-                    </View>
-                )}
-
-                {loading && (
-                    <View style={styles.loadingContainer}>
-                        <Text style={styles.loadingText}>⟳ Loading weather data...</Text>
-                    </View>
-                )}
+                    )
+                }
 
                 {/* Footer */}
                 <View style={styles.footer}>
@@ -1603,7 +1780,7 @@ export default function HomeScreen({ location }) {
                         <Text style={styles.footerTagline}>Weather Intelligence for Outdoor Adventures</Text>
                     </View>
                 </View>
-            </ScrollView>
+            </ScrollView >
 
             {/* Location Search Modal */}
             {
@@ -1615,122 +1792,271 @@ export default function HomeScreen({ location }) {
                     />
                 )
             }
-        </View>
+        </View >
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#f0f4f8',
     },
     scrollView: {
         flex: 1,
         paddingHorizontal: 16,
     },
     headerContainer: {
-        paddingTop: 60,
-        paddingBottom: 20,
-        alignItems: 'center',
+        paddingTop: 50,
+        paddingBottom: 30,
+        marginBottom: 10,
+    },
+    headerBackground: {
+        backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        borderRadius: 20,
+        padding: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        elevation: 15,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    headerGradientOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(102, 126, 234, 0.9)',
+        borderRadius: 20,
     },
     logoContainer: {
         flexDirection: 'row',
         alignItems: 'center',
+        zIndex: 2,
+        marginBottom: 15,
     },
     logoCircle: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 15,
+        borderWidth: 2,
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+        position: 'relative',
+    },
+    logoGlow: {
+        position: 'absolute',
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        top: -10,
+        left: -10,
+    },
+    logoText: {
+        fontSize: 28,
+        zIndex: 1,
+    },
+    headerTextContainer: {
+        flex: 1,
+    },
+    headerTitle: {
+        fontSize: 28,
+        fontWeight: '800',
+        color: 'white',
+        marginBottom: 4,
+    },
+    headerSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255, 255, 255, 0.8)',
+        letterSpacing: 2,
+        fontWeight: '600',
+        marginBottom: 8,
+    },
+
+    locationInfo: {
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(102, 126, 234, 0.1)',
+    },
+    locationCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    locationIconContainer: {
         width: 50,
         height: 50,
         borderRadius: 25,
-        backgroundColor: '#4a90e2',
+        backgroundColor: '#e8f4fd',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 12,
+        marginRight: 15,
+        position: 'relative',
     },
-    logoText: {
-        fontSize: 24,
+    locationIcon: {
+        fontSize: 20,
     },
-    headerTextContainer: {
-        alignItems: 'flex-start',
+    locationPulse: {
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(74, 144, 226, 0.2)',
+        top: -5,
+        left: -5,
     },
-    headerTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#2c3e50',
-    },
-    headerSubtitle: {
-        fontSize: 12,
-        color: '#7f8c8d',
-        letterSpacing: 1,
-    },
-    locationInfo: {
-        backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+    locationContent: {
+        flex: 1,
     },
     locationHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 6,
     },
     locationLabel: {
         fontSize: 14,
         color: '#7f8c8d',
-        fontWeight: '500',
+        fontWeight: '600',
     },
-    searchLocationBtn: {
-        backgroundColor: '#e8f4fd',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
+    locationStatus: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
-    searchLocationBtnText: {
-        color: '#4a90e2',
+    statusDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 6,
+    },
+    statusText: {
         fontSize: 12,
+        color: '#7f8c8d',
         fontWeight: '500',
     },
     locationText: {
         fontSize: 16,
         color: '#2c3e50',
-        fontWeight: '500',
-        marginBottom: 12,
+        fontWeight: '600',
     },
-    useGPSBtn: {
-        backgroundColor: '#4a90e2',
-        paddingVertical: 10,
-        borderRadius: 8,
+    locationActions: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    locationActionBtn: {
+        flex: 1,
+        flexDirection: 'row',
         alignItems: 'center',
-    },
-    useGPSBtnText: {
-        color: 'white',
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    dateSection: {
-        backgroundColor: 'white',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
         borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
         elevation: 3,
     },
-    dateSectionHeader: {
-        marginBottom: 16,
+    searchBtn: {
+        backgroundColor: '#f8f9fa',
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    gpsBtn: {
+        backgroundColor: '#4a90e2',
+    },
+    loadingBtn: {
+        backgroundColor: '#95a5a6',
+    },
+    actionBtnIcon: {
+        fontSize: 16,
+        marginRight: 8,
+    },
+    actionBtnText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#2c3e50',
+    },
+    dateSection: {
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(102, 126, 234, 0.1)',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    sectionTitleContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    sectionIconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#e8f4fd',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    sectionIcon: {
+        fontSize: 18,
     },
     sectionTitle: {
         fontSize: 18,
-        fontWeight: 'bold',
+        fontWeight: '700',
         color: '#2c3e50',
-        marginBottom: 8,
+        marginBottom: 2,
+    },
+    sectionSubtitle: {
+        fontSize: 12,
+        color: '#7f8c8d',
+        fontWeight: '500',
+    },
+    selectedDateBadge: {
+        backgroundColor: '#e8f4fd',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#4a90e2',
+    },
+    selectedDateLabel: {
+        fontSize: 10,
+        color: '#4a90e2',
+        fontWeight: '600',
+        marginBottom: 2,
+    },
+    selectedDateText: {
+        fontSize: 12,
+        color: '#2c3e50',
+        fontWeight: '600',
     },
     selectedDateInfo: {
         backgroundColor: '#e8f4fd',
@@ -1846,69 +2172,159 @@ const styles = StyleSheet.create({
     },
     activitySection: {
         backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(102, 126, 234, 0.1)',
+    },
+    activityCounter: {
+        backgroundColor: '#f8f9fa',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    counterText: {
+        fontSize: 11,
+        color: '#7f8c8d',
+        fontWeight: '600',
     },
     activityScroll: {
-        marginBottom: 12,
+        marginBottom: 16,
     },
     activityCard: {
         backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        padding: 16,
-        marginRight: 12,
+        borderRadius: 16,
+        padding: 18,
+        marginRight: 16,
         alignItems: 'center',
-        width: 120,
+        width: 140,
         borderWidth: 2,
         borderColor: 'transparent',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 4,
+        position: 'relative',
     },
     activityCardSelected: {
         backgroundColor: '#e8f4fd',
         borderColor: '#4a90e2',
+        shadowColor: '#4a90e2',
+        shadowOpacity: 0.2,
+        transform: [{ scale: 1.02 }],
+    },
+    activityCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        marginBottom: 12,
+        position: 'relative',
     },
     activityIcon: {
-        fontSize: 32,
-        marginBottom: 8,
+        fontSize: 36,
+    },
+    selectedBadge: {
+        position: 'absolute',
+        top: -8,
+        right: -8,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#4a90e2',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#4a90e2',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 6,
+    },
+    selectedBadgeText: {
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 'bold',
     },
     activityTitle: {
         fontSize: 14,
-        fontWeight: 'bold',
+        fontWeight: '700',
         color: '#2c3e50',
-        marginBottom: 4,
+        marginBottom: 6,
         textAlign: 'center',
     },
     activityDescription: {
-        fontSize: 10,
+        fontSize: 11,
         color: '#7f8c8d',
         textAlign: 'center',
+        lineHeight: 14,
+        marginBottom: 12,
     },
-    activityTip: {
-        backgroundColor: '#f8f9fa',
-        padding: 12,
-        borderRadius: 8,
+    activityFooter: {
+        width: '100%',
+        alignItems: 'center',
+    },
+    activityDots: {
+        flexDirection: 'row',
+        gap: 4,
+    },
+    dot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#e9ecef',
+    },
+    activeDot: {
+        backgroundColor: '#4a90e2',
+    },
+    activityInsight: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#f0f8ff',
+        padding: 16,
+        borderRadius: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#4a90e2',
+    },
+    insightIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#e8f4fd',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    insightEmoji: {
+        fontSize: 16,
     },
     activityTipText: {
-        fontSize: 12,
-        color: '#7f8c8d',
-        textAlign: 'center',
-        lineHeight: 16,
+        fontSize: 13,
+        color: '#2c3e50',
+        lineHeight: 18,
+        flex: 1,
+        fontWeight: '500',
     },
     weatherSection: {
         backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(102, 126, 234, 0.1)',
     },
     conditionCard: {
         backgroundColor: '#f8f9fa',
@@ -1954,44 +2370,53 @@ const styles = StyleSheet.create({
         color: '#7f8c8d',
     },
     footer: {
-        backgroundColor: '#2c3e50',
-        borderRadius: 12,
-        marginTop: 20,
-        marginBottom: 20,
+        backgroundColor: 'linear-gradient(135deg, #2c3e50 0%, #34495e 100%)',
+        borderRadius: 16,
+        marginTop: 30,
+        marginBottom: 30,
         overflow: 'hidden',
+        shadowColor: '#2c3e50',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        elevation: 15,
     },
     footerContent: {
-        padding: 20,
+        padding: 24,
         alignItems: 'center',
+        position: 'relative',
     },
     footerLogo: {
-        fontSize: 20,
-        fontWeight: 'bold',
+        fontSize: 22,
+        fontWeight: '800',
         color: 'white',
         marginBottom: 8,
     },
     footerCopyright: {
         fontSize: 14,
         color: '#bdc3c7',
-        marginBottom: 4,
-        fontWeight: '500',
+        marginBottom: 6,
+        fontWeight: '600',
     },
     footerTagline: {
         fontSize: 12,
         color: '#95a5a6',
         textAlign: 'center',
         fontStyle: 'italic',
+        letterSpacing: 0.5,
     },
     alertsSection: {
         backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#e74c3c',
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(231, 76, 60, 0.1)',
     },
     alertsSubtitle: {
         fontSize: 12,
@@ -2170,14 +2595,16 @@ const styles = StyleSheet.create({
     },
     clothingSection: {
         backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 12,
+        elevation: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(102, 126, 234, 0.1)',
     },
     clothingSubtitle: {
         fontSize: 12,
@@ -2225,6 +2652,17 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#34495e',
         lineHeight: 16,
+    },
+    analyticsItem: {
+        backgroundColor: '#f0f8ff',
+        borderLeftColor: '#2980b9',
+        borderLeftWidth: 4,
+    },
+    analyticsRecommendation: {
+        fontSize: 11,
+        color: '#2c3e50',
+        lineHeight: 15,
+        fontFamily: 'monospace',
     },
     arIntegrationCard: {
         backgroundColor: '#e8f4fd',
