@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🌤️ Climatrail - Weather Intelligence App
 
 > **Professional outdoor weather risk analysis for adventurers**
